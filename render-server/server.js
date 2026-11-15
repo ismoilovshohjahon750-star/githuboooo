@@ -12,6 +12,10 @@ const SUPER_ADMIN_ID = parseInt(process.env.SUPER_ADMIN_ID || '8453381252', 10);
 const DB_FILE = path.join(__dirname, 'data', 'smartboard_db.json');
 const ONLINE_TIMEOUT_MS = 15000;
 const DIVIDER = '────────────────────';
+const { ensureDeployReset } = require('./scripts/reset-data');
+
+// Har yangi deployda eski ma'lumotlarni tegi bilan tozalash
+ensureDeployReset();
 
 if (!fs.existsSync(path.join(__dirname, 'data'))) {
   fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true });

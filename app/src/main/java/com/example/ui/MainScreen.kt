@@ -159,8 +159,6 @@ fun MainScreen(
                 rooms = uiState.rooms,
                 androidId = uiState.androidId,
                 macAddress = uiState.macAddress,
-                isEmbeddedWebServerRunning = uiState.isEmbeddedWebServerRunning,
-                localWifiUrls = uiState.localWifiUrls,
                 onAddRoom = { id, name -> boardViewModel.addRoom(id, name) },
                 onRemoveRoom = { id -> boardViewModel.removeRoom(id) },
                 onClearRooms = { boardViewModel.clearRooms() },
@@ -177,9 +175,6 @@ fun MainScreen(
                 },
                 onTestServer = { url ->
                     boardViewModel.testServerConnection(url)
-                },
-                onDiscoverMaster = {
-                    boardViewModel.discoverMasterServerUrl()
                 },
                 onDismiss = {
                     boardViewModel.closeSettingsDialog()

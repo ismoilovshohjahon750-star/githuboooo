@@ -16,3 +16,6 @@
 local.properties
 .env
 debug.keystore
+node_modules/
+render-server/data/
+render-server/.deploy-build-id

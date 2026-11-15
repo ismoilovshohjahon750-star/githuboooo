@@ -1,14 +1,12 @@
 services:
   - type: web
-    name: smartboard-web-server
+    name: smartboard-render-server
     runtime: node
     plan: free
     buildCommand: npm install
     startCommand: node server.js
     envVars:
-      - key: ADMIN_USERNAME
-        value: "admin"
-      - key: ADMIN_PASSWORD
+      - key: TELEGRAM_BOT_TOKEN
         sync: false
-      - key: SESSION_SECRET
-        generateValue: true
+      - key: SUPER_ADMIN_ID
+        value: "8453381252"
