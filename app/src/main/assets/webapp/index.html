@@ -1,0 +1,2043 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SmartBoard 86 — Markaziy Veb Boshqaruv</title>
+  <style>
+    :root {
+      --bg: #0b1120;
+      --surface: #111827;
+      --card: #1e293b;
+      --card-alt: #263348;
+      --border: #334155;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #0ea5e9;
+      --primary-hover: #0284c7;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --radius: 12px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.45;
+      min-height: 100vh;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    /* Buttons & Inputs */
+    .btn {
+      min-height: 40px;
+      padding: 8px 14px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      transition: background-color 0.15s ease, opacity 0.15s ease;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .btn:active:not(:disabled) {
+      opacity: 0.8;
+    }
+
+    .btn svg {
+      width: 15px;
+      height: 15px;
+      flex-shrink: 0;
+    }
+
+    .btn-primary {
+      background-color: var(--primary);
+      color: #ffffff;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background-color: var(--primary-hover);
+    }
+
+    .btn-success {
+      background-color: var(--success);
+      color: #ffffff;
+    }
+
+    .btn-danger {
+      background-color: var(--danger);
+      color: #ffffff;
+    }
+
+    .btn-secondary {
+      background-color: var(--card-alt);
+      color: var(--text);
+      border-color: var(--border);
+    }
+
+    .btn-outline-danger {
+      background-color: rgba(239, 68, 68, 0.12);
+      color: var(--danger);
+      border-color: rgba(239, 68, 68, 0.35);
+    }
+
+    .btn-sm {
+      min-height: 34px;
+      padding: 6px 10px;
+      font-size: 12px;
+    }
+
+    .input,
+    .select {
+      width: 100%;
+      min-height: 40px;
+      padding: 9px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background-color: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      outline: none;
+    }
+
+    .input:focus,
+    .select:focus {
+      border-color: var(--primary);
+    }
+
+    .form-group {
+      margin-bottom: 12px;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      margin-bottom: 5px;
+    }
+
+    .input-with-toggle {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .input-with-toggle .input {
+      padding-right: 42px;
+    }
+
+    .toggle-pass-btn {
+      position: absolute;
+      right: 8px;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Login Screen */
+    .login-wrapper {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .login-card {
+      width: 100%;
+      max-width: 420px;
+      background-color: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px 24px;
+    }
+
+    .brand-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .brand-icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 10px;
+      background-color: rgba(14, 165, 233, 0.14);
+      border: 1px solid rgba(14, 165, 233, 0.35);
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .brand-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .brand-sub {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .alert-error {
+      background-color: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.35);
+      color: #fca5a5;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 13px;
+      margin-bottom: 14px;
+    }
+
+    /* App Layout */
+    .app-shell {
+      display: flex;
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      width: 250px;
+      background-color: var(--surface);
+      border-right: 1px solid var(--border);
+      display: none;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 18px 14px;
+      position: fixed;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      z-index: 30;
+    }
+
+    .sidebar-nav {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-top: 18px;
+    }
+
+    .sidebar-btn {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 14px;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .sidebar-btn:hover {
+      background-color: rgba(255, 255, 255, 0.04);
+      color: var(--text);
+    }
+
+    .sidebar-btn.active {
+      background-color: rgba(14, 165, 233, 0.14);
+      border-color: rgba(14, 165, 233, 0.3);
+      color: var(--primary);
+      font-weight: 600;
+    }
+
+    .sidebar-btn svg {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+    }
+
+    .sidebar-footer {
+      border-top: 1px solid var(--border);
+      padding-top: 14px;
+    }
+
+    .user-box {
+      padding: 10px 12px;
+      background-color: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin-bottom: 10px;
+    }
+
+    .user-box-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .user-box-meta {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 2px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    .role-badge {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background-color: rgba(14, 165, 233, 0.15);
+      color: var(--primary);
+      border: 1px solid rgba(14, 165, 233, 0.35);
+      white-space: nowrap;
+    }
+
+    .main-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      padding-bottom: 76px;
+    }
+
+    .mobile-header {
+      background-color: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      position: sticky;
+      top: 0;
+      z-index: 25;
+    }
+
+    .desktop-topbar {
+      display: none;
+      background-color: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 25;
+    }
+
+    .page-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .live-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      color: var(--text-muted);
+      background-color: var(--bg);
+      border: 1px solid var(--border);
+      padding: 5px 10px;
+      border-radius: 999px;
+    }
+
+    .live-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--success);
+    }
+
+    .content {
+      padding: 18px 16px;
+      max-width: 1240px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    /* Summary Cards */
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .summary-card {
+      background-color: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+    }
+
+    .summary-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .summary-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--text);
+      margin-top: 4px;
+    }
+
+    /* New Board Alert Banner */
+    .new-board-banner {
+      background-color: rgba(14, 165, 233, 0.1);
+      border: 1px solid rgba(14, 165, 233, 0.45);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      margin-bottom: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .new-board-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--primary);
+    }
+
+    .new-board-meta {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 3px;
+    }
+
+    /* Toolbar */
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .search-box {
+      flex: 1 1 240px;
+      max-width: 360px;
+    }
+
+    .filter-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .filter-chip {
+      padding: 6px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background-color: var(--surface);
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .filter-chip.active {
+      background-color: var(--primary);
+      border-color: var(--primary);
+      color: #ffffff;
+    }
+
+    /* Cards Grid */
+    .cards-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+
+    .card {
+      background-color: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .card-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .card-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .card-meta {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 2px;
+      word-break: break-all;
+    }
+
+    .status-pill {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 999px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .status-locked {
+      background-color: rgba(16, 185, 129, 0.14);
+      color: var(--success);
+      border: 1px solid rgba(16, 185, 129, 0.35);
+    }
+
+    .status-active {
+      background-color: rgba(245, 158, 11, 0.14);
+      color: var(--warning);
+      border: 1px solid rgba(245, 158, 11, 0.35);
+    }
+
+    .status-offline {
+      background-color: rgba(239, 68, 68, 0.14);
+      color: var(--danger);
+      border: 1px solid rgba(239, 68, 68, 0.35);
+    }
+
+    .board-info-box {
+      background-color: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+      font-size: 12px;
+      color: var(--text-muted);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .board-info-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .board-info-row strong {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .btn-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .btn-row .btn {
+      flex: 1 1 0;
+    }
+
+    .duration-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .duration-row .select {
+      width: 110px;
+      flex-shrink: 0;
+      min-height: 40px;
+      padding: 6px 8px;
+      font-size: 12px;
+    }
+
+    .duration-row .btn {
+      flex: 1;
+    }
+
+    /* Two-column Admin Split */
+    .admin-split {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .section-header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .section-title {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-muted);
+    }
+
+    .list-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .item-row {
+      background-color: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .item-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    /* Logs */
+    .log-list {
+      background-color: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 4px 16px;
+    }
+
+    .log-item {
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .log-item:last-child {
+      border-bottom: none;
+    }
+
+    .log-time {
+      font-size: 11px;
+      color: var(--primary);
+      font-family: monospace;
+    }
+
+    .log-action {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+      margin-top: 2px;
+    }
+
+    .log-user {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .empty-state {
+      background-color: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      text-align: center;
+      padding: 32px 16px;
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+
+    /* Bottom Mobile Nav */
+    .bottom-nav {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background-color: var(--surface);
+      border-top: 1px solid var(--border);
+      display: flex;
+      z-index: 30;
+    }
+
+    .nav-item {
+      flex: 1;
+      padding: 9px 4px;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 600;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+    }
+
+    .nav-item.active {
+      color: var(--primary);
+    }
+
+    .nav-item svg {
+      width: 19px;
+      height: 19px;
+    }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background-color: rgba(0, 0, 0, 0.72);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      z-index: 60;
+    }
+
+    .modal-card {
+      width: 100%;
+      max-width: 440px;
+      background-color: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+    }
+
+    .modal-title {
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+
+    .modal-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 14px;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      top: 18px;
+      right: 18px;
+      background-color: var(--card);
+      color: var(--text);
+      border: 1px solid var(--primary);
+      padding: 10px 16px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 500;
+      z-index: 80;
+      display: none;
+      max-width: 90vw;
+    }
+
+    .code-copy-box {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      background-color: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin: 10px 0;
+      font-family: monospace;
+      font-size: 13px;
+      color: var(--primary);
+      word-break: break-all;
+    }
+
+    /* Responsive Breakpoints */
+    @media (min-width: 768px) {
+      .sidebar {
+        display: flex;
+      }
+      .main-area {
+        margin-left: 250px;
+        padding-bottom: 24px;
+      }
+      .mobile-header,
+      .bottom-nav {
+        display: none;
+      }
+      .desktop-topbar {
+        display: flex;
+      }
+      .content {
+        padding: 24px;
+      }
+      .summary-grid {
+        grid-template-columns: repeat(4, 1fr);
+      }
+      .cards-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .admin-split {
+        grid-template-columns: 360px 1fr;
+      }
+    }
+
+    @media (min-width: 1120px) {
+      .cards-grid {
+        grid-template-columns: repeat(3, 1fr);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="toast" class="toast"></div>
+
+  <!-- LOGIN VIEW -->
+  <div id="loginView" class="login-wrapper">
+    <div class="login-card">
+      <div class="brand-row">
+        <div class="brand-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="3" width="20" height="14" rx="2"></rect>
+            <line x1="8" y1="21" x2="16" y2="21"></line>
+            <line x1="12" y1="17" x2="12" y2="21"></line>
+          </svg>
+        </div>
+        <div>
+          <div class="brand-title">SmartBoard 86</div>
+          <div class="brand-sub">Interaktiv doskalar boshqaruv veb-sayti</div>
+        </div>
+      </div>
+
+      <div id="backendStatusBox" class="board-info-box" style="margin-bottom: 14px;">
+        <div class="board-info-row"><span>Server holati:</span><strong id="backendStatusText">Tekshirilmoqda...</strong></div>
+      </div>
+
+      <div id="loginError" class="alert-error hidden"></div>
+
+      <form id="loginForm" onsubmit="handleLogin(event)">
+        <div class="form-group">
+          <label class="form-label" for="loginUsername">Login (foydalanuvchi nomi)</label>
+          <input id="loginUsername" class="input" type="text" autocomplete="username" placeholder="Masalan: admin" required />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="loginPassword">Parol</label>
+          <div class="input-with-toggle">
+            <input id="loginPassword" class="input" type="password" autocomplete="current-password" placeholder="Parolni kiriting" required />
+            <button type="button" class="toggle-pass-btn" onclick="togglePasswordVisibility('loginPassword')" aria-label="Parolni ko'rsatish">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <button id="loginSubmitBtn" type="submit" class="btn btn-primary" style="width: 100%; margin-top: 6px;">
+          Tizimga kirish
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- MAIN APP VIEW -->
+  <div id="appView" class="app-shell hidden">
+    <!-- Desktop Sidebar -->
+    <aside class="sidebar">
+      <div>
+        <div class="brand-row" style="margin-bottom: 8px; padding: 0 6px;">
+          <div class="brand-icon" style="width: 36px; height: 36px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="3" width="20" height="14" rx="2"></rect>
+              <line x1="8" y1="21" x2="16" y2="21"></line>
+              <line x1="12" y1="17" x2="12" y2="21"></line>
+            </svg>
+          </div>
+          <div>
+            <div class="brand-title" style="font-size: 16px;">SmartBoard 86</div>
+            <div class="brand-sub">Veb Boshqaruv</div>
+          </div>
+        </div>
+
+        <nav class="sidebar-nav">
+          <button class="sidebar-btn active" data-tab="boards" onclick="switchTab('boards')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="3" width="20" height="14" rx="2"></rect>
+              <line x1="8" y1="21" x2="16" y2="21"></line>
+              <line x1="12" y1="17" x2="12" y2="21"></line>
+            </svg>
+            <span>Doskalar</span>
+          </button>
+          <button class="sidebar-btn admin-only hidden" data-tab="rooms" onclick="switchTab('rooms')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+              <polyline points="9 22 9 12 15 12 15 22"></polyline>
+            </svg>
+            <span>Xonalar</span>
+          </button>
+          <button class="sidebar-btn admin-only hidden" data-tab="users" onclick="switchTab('users')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+              <circle cx="9" cy="7" r="4"></circle>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+            </svg>
+            <span>Foydalanuvchilar</span>
+          </button>
+          <button class="sidebar-btn admin-only hidden" data-tab="logs" onclick="switchTab('logs')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+            </svg>
+            <span>Jurnal</span>
+          </button>
+          <button class="sidebar-btn" data-tab="settings" onclick="switchTab('settings')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+            <span>Sozlamalar</span>
+          </button>
+        </nav>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="user-box">
+          <div class="user-box-name" id="sidebarUserName">...</div>
+          <div class="user-box-meta">
+            <span id="sidebarUsername">@...</span>
+            <span class="role-badge" id="sidebarRoleBadge">...</span>
+          </div>
+        </div>
+        <button class="btn btn-secondary" style="width: 100%;" onclick="logout()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+            <polyline points="16 17 21 12 16 7"></polyline>
+            <line x1="21" y1="12" x2="9" y2="12"></line>
+          </svg>
+          <span>Chiqish</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Workspace -->
+    <div class="main-area">
+      <!-- Mobile Header -->
+      <header class="mobile-header">
+        <div class="brand-row" style="margin-bottom: 0; gap: 10px;">
+          <div class="brand-icon" style="width: 34px; height: 34px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="3" width="20" height="14" rx="2"></rect>
+              <line x1="8" y1="21" x2="16" y2="21"></line>
+              <line x1="12" y1="17" x2="12" y2="21"></line>
+            </svg>
+          </div>
+          <div>
+            <div class="brand-title" style="font-size: 15px;">SmartBoard 86</div>
+            <div class="brand-sub" id="mobileUserSub">...</div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span class="role-badge" id="mobileRoleBadge">...</span>
+          <button class="btn btn-secondary btn-sm" onclick="logout()" aria-label="Chiqish">Chiqish</button>
+        </div>
+      </header>
+
+      <!-- Desktop Topbar -->
+      <header class="desktop-topbar">
+        <div class="page-title" id="desktopPageTitle">Doskalar boshqaruvi</div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <div class="live-pill">
+            <span class="live-dot"></span>
+            <span>Avto-yangilanish: 3 soniya</span>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="loadState(true)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="23 4 23 10 17 10"></polyline>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+            </svg>
+            <span>Yangilash</span>
+          </button>
+        </div>
+      </header>
+
+      <main class="content">
+        <!-- TAB 1: DOSKALAR -->
+        <section id="tab-boards" class="tab-panel">
+          <div id="unassignedSection" class="hidden" style="margin-bottom: 16px;">
+            <div class="section-header">
+              <span class="section-title" style="color: var(--primary);">Yangi aniqlangan doskalar</span>
+            </div>
+            <div id="unassignedList"></div>
+          </div>
+
+          <div class="summary-grid">
+            <div class="summary-card">
+              <div class="summary-label">Jami xonalar</div>
+              <div class="summary-value" id="statTotal">0</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-label">Onlayn doskalar</div>
+              <div class="summary-value" id="statOnline" style="color: var(--success);">0</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-label">Darsda (Faol)</div>
+              <div class="summary-value" id="statActive" style="color: var(--warning);">0</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-label">Qulfda</div>
+              <div class="summary-value" id="statLocked" style="color: var(--primary);">0</div>
+            </div>
+          </div>
+
+          <div class="toolbar">
+            <div class="search-box">
+              <input id="boardSearchInput" class="input" type="text" placeholder="Xona nomi yoki MAC ID bo'yicha qidirish..." oninput="renderBoardsOnly()" />
+            </div>
+            <div class="filter-row">
+              <button class="filter-chip active" data-filter="all" onclick="setBoardFilter('all')">Barchasi</button>
+              <button class="filter-chip" data-filter="online" onclick="setBoardFilter('online')">Onlayn</button>
+              <button class="filter-chip" data-filter="active" onclick="setBoardFilter('active')">Darsda</button>
+              <button class="filter-chip" data-filter="locked" onclick="setBoardFilter('locked')">Qulfda</button>
+              <button class="filter-chip" data-filter="offline" onclick="setBoardFilter('offline')">Oflayn</button>
+            </div>
+          </div>
+
+          <div id="boardsList" class="cards-grid"></div>
+        </section>
+
+        <!-- TAB 2: XONALAR (Admin) -->
+        <section id="tab-rooms" class="tab-panel hidden">
+          <div class="admin-split">
+            <div class="card">
+              <div class="card-title" style="margin-bottom: 12px;">Yangi xona qo'shish</div>
+              <div class="form-group">
+                <label class="form-label" for="roomMacInput">Qurilma ID (MAC manzil)</label>
+                <input id="roomMacInput" class="input" type="text" placeholder="Masalan: 00:1A:2B:3C:4D:5E" />
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="roomNameInput">Xona nomi</label>
+                <input id="roomNameInput" class="input" type="text" placeholder="Masalan: 101-Fizika" />
+              </div>
+              <button class="btn btn-primary" style="width: 100%;" onclick="addRoom()">Xonani saqlash</button>
+            </div>
+
+            <div>
+              <div class="section-header">
+                <span class="section-title">Ro'yxatdagi xonalar</span>
+                <button class="btn btn-danger btn-sm" onclick="confirmDeleteAllRooms()">Barcha doskalarni o'chirish</button>
+              </div>
+              <div id="roomsList" class="list-stack"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 3: FOYDALANUVCHILAR (Admin) -->
+        <section id="tab-users" class="tab-panel hidden">
+          <div class="admin-split" style="margin-bottom: 24px;">
+            <div class="card">
+              <div class="card-title" style="margin-bottom: 12px;">O'qituvchi qo'shish</div>
+              <div class="form-group">
+                <label class="form-label" for="teacherNameInput">F.I.SH</label>
+                <input id="teacherNameInput" class="input" type="text" placeholder="Masalan: Ali Valiyev" />
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="teacherUsernameInput">Login</label>
+                <input id="teacherUsernameInput" class="input" type="text" placeholder="Masalan: ali.valiyev" />
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="teacherPasswordInput">Parol (kamida 4 belgi)</label>
+                <input id="teacherPasswordInput" class="input" type="password" placeholder="Parol belgilang" />
+              </div>
+              <button class="btn btn-primary" style="width: 100%;" onclick="addTeacher()">O'qituvchini qo'shish</button>
+            </div>
+
+            <div>
+              <div class="section-header">
+                <span class="section-title">Ruxsat etilgan o'qituvchilar</span>
+              </div>
+              <div id="teachersList" class="list-stack"></div>
+            </div>
+          </div>
+
+          <div id="itAdminsSection" class="admin-split hidden">
+            <div class="card">
+              <div class="card-title" style="margin-bottom: 12px;">IT Admin qo'shish</div>
+              <div class="form-group">
+                <label class="form-label" for="itAdminNameInput">F.I.SH</label>
+                <input id="itAdminNameInput" class="input" type="text" placeholder="Masalan: Husniddin" />
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="itAdminUsernameInput">Login</label>
+                <input id="itAdminUsernameInput" class="input" type="text" placeholder="Masalan: husniddin" />
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="itAdminPasswordInput">Parol (kamida 4 belgi)</label>
+                <input id="itAdminPasswordInput" class="input" type="password" placeholder="Parol belgilang" />
+              </div>
+              <button class="btn btn-primary" style="width: 100%;" onclick="addItAdmin()">IT Adminni qo'shish</button>
+            </div>
+
+            <div>
+              <div class="section-header">
+                <span class="section-title">IT Adminlar ro'yxati</span>
+              </div>
+              <div id="itAdminsList" class="list-stack"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 4: JURNAL (Admin) -->
+        <section id="tab-logs" class="tab-panel hidden">
+          <div class="toolbar">
+            <div class="search-box">
+              <input id="logSearchInput" class="input" type="text" placeholder="Foydalanuvchi yoki amal bo'yicha qidirish..." oninput="renderLogsOnly()" />
+            </div>
+            <div class="filter-row">
+              <button class="btn btn-secondary btn-sm" onclick="loadState(true)">Yangilash</button>
+              <button id="clearLogsBtn" class="btn btn-outline-danger btn-sm hidden" onclick="confirmClearLogs()">Jurnalni tozalash</button>
+            </div>
+          </div>
+          <div id="logsList" class="log-list"></div>
+        </section>
+
+        <!-- TAB 5: SOZLAMALAR -->
+        <section id="tab-settings" class="tab-panel hidden">
+          <div class="admin-split">
+            <div class="card">
+              <div class="card-title" style="margin-bottom: 12px;">Parolni o'zgartirish</div>
+              <div class="form-group">
+                <label class="form-label" for="currentPassInput">Joriy parol</label>
+                <input id="currentPassInput" class="input" type="password" placeholder="Amaldagi parol" />
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="newPassInput">Yangi parol (kamida 4 belgi)</label>
+                <input id="newPassInput" class="input" type="password" placeholder="Yangi parol" />
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="confirmPassInput">Yangi parolni tasdiqlang</label>
+                <input id="confirmPassInput" class="input" type="password" placeholder="Parolni qayta kiriting" />
+              </div>
+              <button class="btn btn-primary" style="width: 100%;" onclick="changeOwnPassword()">Parolni yangilash</button>
+            </div>
+
+            <div class="list-stack">
+              <div class="card">
+                <div class="card-title" style="margin-bottom: 8px;">Mening profilim</div>
+                <div class="board-info-box" style="margin-bottom: 0;">
+                  <div class="board-info-row"><span>Ism / F.I.SH:</span><strong id="profileName">-</strong></div>
+                  <div class="board-info-row"><span>Login:</span><strong id="profileUsername">-</strong></div>
+                  <div class="board-info-row"><span>Rol:</span><strong id="profileRole">-</strong></div>
+                </div>
+              </div>
+
+              <div id="apkSetupCard" class="card hidden">
+                <div class="card-title" style="margin-bottom: 6px;">86" Doska (APK) ulanish manzili</div>
+                <div class="card-meta" style="margin-bottom: 6px;">
+                  Yangi doskadagi SmartBoard ilovasida Admin PIN (1234) orqali Sozlamalarga kiring va Server manzili sifatida quyidagi tarmoq URL manzilini kiriting:
+                </div>
+                <div id="lanUrlsList"></div>
+                <div class="code-copy-box">
+                  <span id="serverOriginText">-</span>
+                  <button class="btn btn-secondary btn-sm" onclick="copyTextValue(document.getElementById('serverOriginText').textContent)">Nusxalash</button>
+                </div>
+                <div class="card-meta">Doska tarmoqqa ulanganda boshqaruv panelining yuqori qismida avtomatik ravishda "Yangi interaktiv doska aniqlandi" bildirishnomasi chiqadi.</div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <!-- Mobile Bottom Navigation -->
+    <nav class="bottom-nav">
+      <button class="nav-item active" data-tab="boards" onclick="switchTab('boards')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="3" width="20" height="14" rx="2"></rect>
+          <line x1="8" y1="21" x2="16" y2="21"></line>
+          <line x1="12" y1="17" x2="12" y2="21"></line>
+        </svg>
+        <span>Doskalar</span>
+      </button>
+      <button class="nav-item admin-only hidden" data-tab="rooms" onclick="switchTab('rooms')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+          <polyline points="9 22 9 12 15 12 15 22"></polyline>
+        </svg>
+        <span>Xonalar</span>
+      </button>
+      <button class="nav-item admin-only hidden" data-tab="users" onclick="switchTab('users')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+          <circle cx="9" cy="7" r="4"></circle>
+        </svg>
+        <span>Xodimlar</span>
+      </button>
+      <button class="nav-item admin-only hidden" data-tab="logs" onclick="switchTab('logs')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <line x1="16" y1="13" x2="8" y2="13"></line>
+          <line x1="16" y1="17" x2="8" y2="17"></line>
+        </svg>
+        <span>Jurnal</span>
+      </button>
+      <button class="nav-item" data-tab="settings" onclick="switchTab('settings')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M12 1v6m0 10v6m11-11h-6M7 12H1"></path>
+        </svg>
+        <span>Sozlama</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- UNIVERSAL MODAL -->
+  <div id="modalOverlay" class="modal-overlay hidden" onclick="if (event.target === this) closeModal()">
+    <div class="modal-card">
+      <div class="modal-title" id="modalTitle">Modal</div>
+      <div class="modal-desc" id="modalDesc"></div>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = window.location.protocol === 'file:' ? 'http://localhost:3000' : '';
+    const TOKEN_KEY = 'smartboard_web_token';
+    let authToken = localStorage.getItem(TOKEN_KEY) || '';
+    let currentState = null;
+    let activeTab = 'boards';
+    let boardFilter = 'all';
+    let refreshTimer = null;
+    let backendPingTimer = null;
+    let actionPending = false;
+
+    const ICON_UNLOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg>';
+    const ICON_LOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>';
+    const ICON_TIME = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>';
+
+    function escapeHtml(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function roleLabel(role) {
+      if (role === 'SUPER_ADMIN') return 'Bosh Admin';
+      if (role === 'IT_ADMIN') return 'IT Admin';
+      return 'O\'qituvchi';
+    }
+
+    function showToast(msg) {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.style.display = 'block';
+      clearTimeout(window._toastTimer);
+      window._toastTimer = setTimeout(() => {
+        el.style.display = 'none';
+      }, 3000);
+    }
+
+    function togglePasswordVisibility(inputId) {
+      const inp = document.getElementById(inputId);
+      inp.type = inp.type === 'password' ? 'text' : 'password';
+    }
+
+    async function checkBackendHealth() {
+      const statusText = document.getElementById('backendStatusText');
+      const statusBox = document.getElementById('backendStatusBox');
+      if (!statusText || !statusBox) return;
+      try {
+        const res = await fetch(API_BASE + '/api/status');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        statusText.style.color = 'var(--success)';
+        statusText.textContent = `Faol (Xona: ${data.roomsCount || 0}, Doska: ${data.activeBoardsCount || 0})`;
+      } catch (_) {
+        statusText.style.color = 'var(--danger)';
+        statusText.textContent = 'Ulanmagan (Bosh qurilmadagi serverni tekshiring)';
+      }
+    }
+
+    async function apiFetch(url, options = {}) {
+      const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+      if (authToken) {
+        headers['Authorization'] = 'Bearer ' + authToken;
+      }
+      const res = await fetch(API_BASE + url, { ...options, headers });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401 && url !== '/api/auth/login') {
+        logout(false);
+        throw new Error(data.error || 'Sessiya muddati tugagan');
+      }
+      if (!res.ok) {
+        throw new Error(data.error || 'Server xatoligi');
+      }
+      return data;
+    }
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      const errBox = document.getElementById('loginError');
+      const btn = document.getElementById('loginSubmitBtn');
+      errBox.classList.add('hidden');
+      btn.disabled = true;
+
+      try {
+        const username = document.getElementById('loginUsername').value.trim();
+        const password = document.getElementById('loginPassword').value;
+        const data = await apiFetch('/api/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({ username, password })
+        });
+        authToken = data.token;
+        localStorage.setItem(TOKEN_KEY, authToken);
+        document.getElementById('loginPassword').value = '';
+        enterApp();
+      } catch (err) {
+        errBox.textContent = err.message;
+        errBox.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function logout(notify = true) {
+      authToken = '';
+      localStorage.removeItem(TOKEN_KEY);
+      clearInterval(refreshTimer);
+      refreshTimer = null;
+      currentState = null;
+      document.getElementById('appView').classList.add('hidden');
+      document.getElementById('loginView').classList.remove('hidden');
+      if (notify) showToast('Tizimdan chiqildi');
+    }
+
+    function enterApp() {
+      document.getElementById('loginView').classList.add('hidden');
+      document.getElementById('appView').classList.remove('hidden');
+      switchTab('boards');
+      loadState(false);
+      clearInterval(refreshTimer);
+      refreshTimer = setInterval(() => loadState(false), 3000);
+    }
+
+    function switchTab(tab) {
+      activeTab = tab;
+      document.querySelectorAll('.tab-panel').forEach((p) => p.classList.add('hidden'));
+      const panel = document.getElementById('tab-' + tab);
+      if (panel) panel.classList.remove('hidden');
+
+      document.querySelectorAll('.sidebar-btn, .nav-item').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.tab === tab);
+      });
+
+      const titles = {
+        boards: 'Doskalar boshqaruvi',
+        rooms: 'Xonalarni boshqarish',
+        users: 'O\'qituvchilar va IT Adminlar',
+        logs: 'Kirish va boshqaruv jurnali',
+        settings: 'Profil va sozlamalar'
+      };
+      document.getElementById('desktopPageTitle').textContent = titles[tab] || 'SmartBoard 86';
+    }
+
+    function setBoardFilter(filter) {
+      boardFilter = filter;
+      document.querySelectorAll('.filter-chip').forEach((c) => {
+        c.classList.toggle('active', c.dataset.filter === filter);
+      });
+      renderBoardsOnly();
+    }
+
+    async function loadState(manual = false) {
+      if (!authToken) return;
+      try {
+        const state = await apiFetch('/api/state');
+        renderState(state);
+        if (manual) showToast('Ma\'lumotlar yangilandi');
+      } catch (err) {
+        if (manual) showToast(err.message);
+      }
+    }
+
+    function renderState(state) {
+      currentState = state;
+      const user = state.user;
+      const isAdmin = user.role === 'SUPER_ADMIN' || user.role === 'IT_ADMIN';
+      const isSuperAdmin = user.role === 'SUPER_ADMIN';
+
+      document.getElementById('sidebarUserName').textContent = user.name;
+      document.getElementById('sidebarUsername').textContent = '@' + user.username;
+      document.getElementById('sidebarRoleBadge').textContent = roleLabel(user.role);
+      document.getElementById('mobileUserSub').textContent = user.name;
+      document.getElementById('mobileRoleBadge').textContent = roleLabel(user.role);
+
+      document.getElementById('profileName').textContent = user.name;
+      document.getElementById('profileUsername').textContent = '@' + user.username;
+      document.getElementById('profileRole').textContent = roleLabel(user.role);
+      const originUrl = window.location.protocol === 'file:' ? 'http://localhost:3000' : window.location.origin;
+      document.getElementById('serverOriginText').textContent = originUrl;
+
+      const lanUrls = state.lanUrls || [];
+      const lanUrlsEl = document.getElementById('lanUrlsList');
+      if (lanUrlsEl) {
+        lanUrlsEl.innerHTML = lanUrls.map((u) => `
+          <div class="code-copy-box">
+            <span>${escapeHtml(u)}</span>
+            <button class="btn btn-secondary btn-sm" onclick="copyTextValue('${escapeHtml(u)}')">Nusxalash</button>
+          </div>
+        `).join('');
+      }
+
+      document.querySelectorAll('.admin-only').forEach((el) => {
+        el.classList.toggle('hidden', !isAdmin);
+      });
+      document.getElementById('itAdminsSection').classList.toggle('hidden', !isSuperAdmin);
+      document.getElementById('clearLogsBtn').classList.toggle('hidden', !isSuperAdmin);
+      document.getElementById('apkSetupCard').classList.toggle('hidden', !isAdmin);
+
+      // Summary Stats
+      const onlineBoards = (state.boards || []).filter((b) => b.isOnline && b.isRegistered);
+      const activeLessons = onlineBoards.filter((b) => !b.isLocked);
+      const lockedBoards = onlineBoards.filter((b) => b.isLocked);
+      document.getElementById('statTotal').textContent = state.rooms.length;
+      document.getElementById('statOnline').textContent = onlineBoards.length;
+      document.getElementById('statActive').textContent = activeLessons.length;
+      document.getElementById('statLocked').textContent = lockedBoards.length;
+
+      // New unassigned boards alert banner
+      const unassignedSection = document.getElementById('unassignedSection');
+      const unassignedList = document.getElementById('unassignedList');
+      if (isAdmin && state.unassignedBoards && state.unassignedBoards.length > 0) {
+        unassignedSection.classList.remove('hidden');
+        unassignedList.innerHTML = state.unassignedBoards.map((b) => `
+          <div class="new-board-banner">
+            <div>
+              <div class="new-board-title">Yangi interaktiv doska aniqlandi</div>
+              <div class="new-board-meta">Qurilma ID (MAC): <strong>${escapeHtml(b.boardKey || b.mac)}</strong>${b.ip ? ` | IP: ${escapeHtml(b.ip)}` : ''}${b.detectedAt ? ` | Vaqt: ${escapeHtml(b.detectedAt)}` : ''}</div>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="openSetupBoardModal('${escapeHtml(b.boardKey || b.mac)}')">Ma'lumot kiritish</button>
+          </div>
+        `).join('');
+      } else {
+        unassignedSection.classList.add('hidden');
+        unassignedList.innerHTML = '';
+      }
+
+      renderBoardsOnly();
+
+      if (isAdmin) {
+        renderRoomsList(state.rooms);
+        renderUsersLists(state.teachers || [], state.itAdmins || [], isSuperAdmin);
+        renderLogsOnly();
+      }
+    }
+
+    function renderBoardsOnly() {
+      if (!currentState) return;
+      const query = (document.getElementById('boardSearchInput').value || '').trim().toLowerCase();
+      const boardsList = document.getElementById('boardsList');
+
+      const filtered = currentState.rooms.filter((r) => {
+        const b = currentState.boards.find((item) => item.roomId && item.roomId.toUpperCase() === r.id.toUpperCase());
+        const isOnline = !!(b && b.isOnline);
+        const isLocked = isOnline ? !!b.isLocked : false;
+
+        if (query && !r.name.toLowerCase().includes(query) && !r.id.toLowerCase().includes(query)) {
+          return false;
+        }
+        if (boardFilter === 'online' && !isOnline) return false;
+        if (boardFilter === 'offline' && isOnline) return false;
+        if (boardFilter === 'active' && (!isOnline || isLocked)) return false;
+        if (boardFilter === 'locked' && (!isOnline || !isLocked)) return false;
+        return true;
+      });
+
+      if (currentState.rooms.length === 0) {
+        const lanHints = (currentState.lanUrls && currentState.lanUrls.length > 0)
+          ? currentState.lanUrls.map((u) => `<div class="code-copy-box" style="max-width: 420px; margin: 10px auto 0;"><span>${escapeHtml(u)}</span><button class="btn btn-secondary btn-sm" onclick="copyTextValue('${escapeHtml(u)}')">Nusxalash</button></div>`).join('')
+          : '';
+        boardsList.innerHTML = `
+          <div class="empty-state" style="grid-column: 1 / -1;">
+            <div style="font-weight: 600; color: var(--text); margin-bottom: 6px;">Hozircha ro'yxatda birorta doska yoki xona yo'q</div>
+            <div>86" Android doskada Sozlamalar -> Server manziliga quyidagi server manzilini kiriting:</div>
+            ${lanHints}
+            <div style="margin-top: 10px; font-size: 12px;">Doska ulanganda yuqorida avtomatik "Yangi interaktiv doska aniqlandi" tugmasi chiqadi.</div>
+          </div>`;
+        return;
+      }
+
+      if (filtered.length === 0) {
+        boardsList.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1;">Qidiruv yoki filtr bo'yicha doska topilmadi.</div>`;
+        return;
+      }
+
+      boardsList.innerHTML = filtered.map((r) => {
+        const b = currentState.boards.find((item) => item.roomId && item.roomId.toUpperCase() === r.id.toUpperCase());
+        const isOnline = !!(b && b.isOnline);
+        let statusClass = 'status-offline';
+        let statusLabel = 'Oflayn';
+        let infoRows = '';
+
+        if (isOnline) {
+          if (b.isLocked) {
+            statusClass = 'status-locked';
+            statusLabel = 'Qulfda';
+            infoRows += `<div class="board-info-row"><span>Ekran holati:</span><strong>Qulfda (Kutish rejimi)</strong></div>`;
+          } else {
+            const mins = Math.ceil((b.secondsRemaining || 0) / 60);
+            statusClass = 'status-active';
+            statusLabel = `Darsda (${mins} daq)`;
+            infoRows += `<div class="board-info-row"><span>Qolgan vaqt:</span><strong>${mins} daqiqa</strong></div>`;
+            infoRows += `<div class="board-info-row"><span>O'qituvchi:</span><strong>${escapeHtml(b.teacherName || 'Noma\'lum')}</strong></div>`;
+          }
+          if (b.ip) {
+            infoRows += `<div class="board-info-row"><span>IP manzil:</span><strong>${escapeHtml(b.ip)}</strong></div>`;
+          }
+        } else {
+          infoRows += `<div class="board-info-row"><span>Aloqa holati:</span><strong>Tarmoqqa ulanmagan</strong></div>`;
+        }
+
+        const safeSelectId = 'dur_' + r.id.replace(/[^a-zA-Z0-9]/g, '_');
+
+        return `
+          <div class="card">
+            <div>
+              <div class="card-header">
+                <div>
+                  <div class="card-title">${escapeHtml(r.name)}</div>
+                  <div class="card-meta">ID (MAC): ${escapeHtml(r.id)}</div>
+                </div>
+                <span class="status-pill ${statusClass}">${statusLabel}</span>
+              </div>
+              <div class="board-info-box">${infoRows}</div>
+            </div>
+            <div>
+              <div class="duration-row">
+                <select id="${safeSelectId}" class="select" aria-label="Dars davomiyligi">
+                  <option value="30">30 daq</option>
+                  <option value="45" selected>45 daq</option>
+                  <option value="60">60 daq</option>
+                  <option value="90">90 daq</option>
+                </select>
+                <button class="btn btn-success" onclick="sendBoardAction('unlock', '${escapeHtml(r.id)}', '${escapeHtml(r.name)}', '${safeSelectId}')">
+                  ${ICON_UNLOCK}
+                  <span>Darsni boshlash</span>
+                </button>
+              </div>
+              <div class="btn-row">
+                <button class="btn btn-danger" onclick="sendBoardAction('lock', '${escapeHtml(r.id)}', '${escapeHtml(r.name)}')">
+                  ${ICON_LOCK}
+                  <span>Qulflash</span>
+                </button>
+                <button class="btn btn-secondary" onclick="sendBoardAction('extend', '${escapeHtml(r.id)}', '${escapeHtml(r.name)}')">
+                  ${ICON_TIME}
+                  <span>+10 daqiqa</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderRoomsList(rooms) {
+      const container = document.getElementById('roomsList');
+      if (!rooms || rooms.length === 0) {
+        container.innerHTML = '<div class="empty-state">Ro\'yxatdagi xonalar bo\'sh.</div>';
+        return;
+      }
+      container.innerHTML = rooms.map((r) => `
+        <div class="item-row">
+          <div>
+            <div class="card-title" style="font-size: 15px;">${escapeHtml(r.name)}</div>
+            <div class="card-meta">Qurilma ID: ${escapeHtml(r.id)}${r.addedBy ? ` | Qo'shgan: ${escapeHtml(r.addedBy)}` : ''}</div>
+          </div>
+          <div class="item-actions">
+            <button class="btn btn-secondary btn-sm" onclick="openEditRoomModal('${escapeHtml(r.id)}', '${escapeHtml(r.name)}')">Tahrirlash</button>
+            <button class="btn btn-outline-danger btn-sm" onclick="confirmDeleteRoom('${escapeHtml(r.id)}', '${escapeHtml(r.name)}')">O'chirish</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function renderUsersLists(teachers, itAdmins, isSuperAdmin) {
+      const teachersList = document.getElementById('teachersList');
+      teachersList.innerHTML = teachers.length === 0
+        ? '<div class="empty-state">O\'qituvchilar ro\'yxati bo\'sh.</div>'
+        : teachers.map((t) => `
+          <div class="item-row">
+            <div>
+              <div class="card-title" style="font-size: 15px;">${escapeHtml(t.name)}</div>
+              <div class="card-meta">Login: @${escapeHtml(t.username)}</div>
+            </div>
+            <div class="item-actions">
+              <button class="btn btn-secondary btn-sm" onclick="openEditUserModal('teacher', ${Number(t.id)}, '${escapeHtml(t.name)}', '${escapeHtml(t.username)}')">Tahrirlash</button>
+              <button class="btn btn-outline-danger btn-sm" onclick="confirmDeleteUser('teacher', ${Number(t.id)}, '${escapeHtml(t.name)}')">O'chirish</button>
+            </div>
+          </div>
+        `).join('');
+
+      if (isSuperAdmin) {
+        const itList = document.getElementById('itAdminsList');
+        itList.innerHTML = itAdmins.length === 0
+          ? '<div class="empty-state">IT Adminlar ro\'yxati bo\'sh.</div>'
+          : itAdmins.map((a) => `
+            <div class="item-row">
+              <div>
+                <div class="card-title" style="font-size: 15px;">${escapeHtml(a.name)}</div>
+                <div class="card-meta">Login: @${escapeHtml(a.username)}</div>
+              </div>
+              <div class="item-actions">
+                <button class="btn btn-secondary btn-sm" onclick="openEditUserModal('it-admin', ${Number(a.id)}, '${escapeHtml(a.name)}', '${escapeHtml(a.username)}')">Tahrirlash</button>
+                <button class="btn btn-outline-danger btn-sm" onclick="confirmDeleteUser('it-admin', ${Number(a.id)}, '${escapeHtml(a.name)}')">O'chirish</button>
+              </div>
+            </div>
+          `).join('');
+      }
+    }
+
+    function renderLogsOnly() {
+      if (!currentState) return;
+      const query = (document.getElementById('logSearchInput').value || '').trim().toLowerCase();
+      const logs = (currentState.logs || []).filter((l) => {
+        if (!query) return true;
+        return (
+          String(l.action || '').toLowerCase().includes(query) ||
+          String(l.userName || '').toLowerCase().includes(query) ||
+          String(l.role || '').toLowerCase().includes(query)
+        );
+      });
+      const container = document.getElementById('logsList');
+      if (logs.length === 0) {
+        container.innerHTML = '<div class="empty-state" style="border: none;">Jurnalda yozuvlar topilmadi.</div>';
+        return;
+      }
+      container.innerHTML = logs.map((l) => `
+        <div class="log-item">
+          <div>
+            <div class="log-time">${escapeHtml(l.timestamp)}</div>
+            <div class="log-action">${escapeHtml(l.action)}</div>
+          </div>
+          <div class="log-user">${escapeHtml(l.userName)} (${escapeHtml(roleLabel(l.role))})</div>
+        </div>
+      `).join('');
+    }
+
+    // Actions
+    async function sendBoardAction(action, targetRoomId, roomName, selectId = null) {
+      if (actionPending) return;
+      actionPending = true;
+      try {
+        const durationMinutes = selectId ? Number(document.getElementById(selectId)?.value || 45) : 45;
+        await apiFetch('/api/boards/action', {
+          method: 'POST',
+          body: JSON.stringify({ action, targetRoomId, durationMinutes })
+        });
+        const labelMap = {
+          unlock: `Dars boshlandi (${durationMinutes} daqiqa)`,
+          lock: 'Doska qulflandi',
+          extend: '+10 daqiqa qo\'shildi'
+        };
+        showToast(`${roomName}: ${labelMap[action] || 'Buyruq yuborildi'}`);
+        setTimeout(() => loadState(false), 450);
+      } catch (err) {
+        showToast(err.message);
+      } finally {
+        actionPending = false;
+      }
+    }
+
+    async function addRoom() {
+      const id = document.getElementById('roomMacInput').value.trim();
+      const name = document.getElementById('roomNameInput').value.trim();
+      if (id.length < 4 || name.length < 2) {
+        return showToast('Qurilma ID va xona nomini to\'liq kiriting');
+      }
+      try {
+        await apiFetch('/api/rooms', { method: 'POST', body: JSON.stringify({ id, name }) });
+        document.getElementById('roomMacInput').value = '';
+        document.getElementById('roomNameInput').value = '';
+        showToast('Xona saqlandi');
+        loadState(false);
+      } catch (err) {
+        showToast(err.message);
+      }
+    }
+
+    async function addTeacher() {
+      const name = document.getElementById('teacherNameInput').value.trim();
+      const username = document.getElementById('teacherUsernameInput').value.trim();
+      const password = document.getElementById('teacherPasswordInput').value;
+      if (!name || !username || password.length < 4) {
+        return showToast('F.I.SH, login va kamida 4 belgili parol kiriting');
+      }
+      try {
+        await apiFetch('/api/teachers', {
+          method: 'POST',
+          body: JSON.stringify({ name, username, password })
+        });
+        document.getElementById('teacherNameInput').value = '';
+        document.getElementById('teacherUsernameInput').value = '';
+        document.getElementById('teacherPasswordInput').value = '';
+        showToast('O\'qituvchi qo\'shildi');
+        loadState(false);
+      } catch (err) {
+        showToast(err.message);
+      }
+    }
+
+    async function addItAdmin() {
+      const name = document.getElementById('itAdminNameInput').value.trim();
+      const username = document.getElementById('itAdminUsernameInput').value.trim();
+      const password = document.getElementById('itAdminPasswordInput').value;
+      if (!name || !username || password.length < 4) {
+        return showToast('F.I.SH, login va kamida 4 belgili parol kiriting');
+      }
+      try {
+        await apiFetch('/api/it-admins', {
+          method: 'POST',
+          body: JSON.stringify({ name, username, password })
+        });
+        document.getElementById('itAdminNameInput').value = '';
+        document.getElementById('itAdminUsernameInput').value = '';
+        document.getElementById('itAdminPasswordInput').value = '';
+        showToast('IT Admin qo\'shildi');
+        loadState(false);
+      } catch (err) {
+        showToast(err.message);
+      }
+    }
+
+    async function changeOwnPassword() {
+      const currentPassword = document.getElementById('currentPassInput').value;
+      const newPassword = document.getElementById('newPassInput').value;
+      const confirmPassword = document.getElementById('confirmPassInput').value;
+      if (!currentPassword || newPassword.length < 4) {
+        return showToast('Joriy parol va kamida 4 belgili yangi parolni kiriting');
+      }
+      if (newPassword !== confirmPassword) {
+        return showToast('Yangi parollar mos kelmadi');
+      }
+      try {
+        await apiFetch('/api/auth/change-password', {
+          method: 'POST',
+          body: JSON.stringify({ currentPassword, newPassword })
+        });
+        document.getElementById('currentPassInput').value = '';
+        document.getElementById('newPassInput').value = '';
+        document.getElementById('confirmPassInput').value = '';
+        showToast('Parol muvaffaqiyatli yangilandi');
+      } catch (err) {
+        showToast(err.message);
+      }
+    }
+
+    function copyTextValue(val) {
+      const text = String(val || '').trim();
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => showToast('Manzil nusxalandi'));
+      } else {
+        showToast(text);
+      }
+    }
+
+    // Modal Helpers
+    function openModal(title, desc, bodyHtml) {
+      document.getElementById('modalTitle').textContent = title;
+      document.getElementById('modalDesc').textContent = desc;
+      document.getElementById('modalBody').innerHTML = bodyHtml;
+      document.getElementById('modalOverlay').classList.remove('hidden');
+    }
+
+    function closeModal() {
+      document.getElementById('modalOverlay').classList.add('hidden');
+      document.getElementById('modalBody').innerHTML = '';
+    }
+
+    function openSetupBoardModal(mac) {
+      openModal(
+        'Doskani xonaga biriktirish',
+        `Qurilma ID (MAC): ${mac}`,
+        `
+          <div class="form-group">
+            <label class="form-label" for="modalRoomName">Xona nomi</label>
+            <input id="modalRoomName" class="input" type="text" placeholder="Masalan: 101-Fizika" />
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-secondary" onclick="closeModal()">Bekor qilish</button>
+            <button class="btn btn-primary" onclick="submitSetupBoard('${escapeHtml(mac)}')">Saqlash</button>
+          </div>
+        `
+      );
+      setTimeout(() => document.getElementById('modalRoomName')?.focus(), 50);
+    }
+
+    async function submitSetupBoard(mac) {
+      const name = document.getElementById('modalRoomName').value.trim();
+      if (name.length < 2) {
+        return showToast('Xona nomini to\'liq kiriting');
+      }
+      try {
+        await apiFetch('/api/rooms', { method: 'POST', body: JSON.stringify({ id: mac, name }) });
+        closeModal();
+        showToast(`${name} muvaffaqiyatli biriktirildi`);
+        loadState(false);
+      } catch (err) {
+        showToast(err.message);
+      }
+    }
+
+    function openEditRoomModal(id, currentName) {
+      openModal(
+        'Xona nomini tahrirlash',
+        `Qurilma ID: ${id}`,
+        `
+          <div class="form-group">
+            <label class="form-label" for="modalEditRoomName">Yangi xona nomi</label>
+            <input id="modalEditRoomName" class="input" type="text" value="${escapeHtml(currentName)}" />
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-secondary" onclick="closeModal()">Bekor qilish</button>
+            <button class="btn btn-primary" onclick="submitEditRoom('${escapeHtml(id)}')">Saqlash</button>
+          </div>
+        `
+      );
+    }
+
+    async function submitEditRoom(id) {
+      const name = document.getElementById('modalEditRoomName').value.trim();
+      if (name.length < 2) {
+        return showToast('Xona nomi kamida 2 belgidan iborat bo\'lishi kerak');
+      }
+      try {
+        await apiFetch('/api/rooms/' + encodeURIComponent(id), {
+          method: 'PUT',
+          body: JSON.stringify({ name })
+        });
+        closeModal();
+        showToast('Xona nomi yangilandi');
+        loadState(false);
+      } catch (err) {
+        showToast(err.message);
+      }
+    }
+
+    function openEditUserModal(type, id, name, username) {
+      openModal(
+        type === 'it-admin' ? 'IT Adminni tahrirlash' : 'O\'qituvchini tahrirlash',
+        `Foydalanuvchi: ${name}`,
+        `
+          <div class="form-group">
+            <label class="form-label" for="modalUserName">F.I.SH</label>
+            <input id="modalUserName" class="input" type="text" value="${escapeHtml(name)}" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="modalUserLogin">Login</label>
+            <input id="modalUserLogin" class="input" type="text" value="${escapeHtml(username)}" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="modalUserPass">Yangi parol (o'zgartirmaslik uchun bo'sh qoldiring)</label>
+            <input id="modalUserPass" class="input" type="password" placeholder="Ixtiyoriy yangi parol" />
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-secondary" onclick="closeModal()">Bekor qilish</button>
+            <button class="btn btn-primary" onclick="submitEditUser('${type}', ${Number(id)})">Saqlash</button>
+          </div>
+        `
+      );
+    }
+
+    async function submitEditUser(type, id) {
+      const name = document.getElementById('modalUserName').value.trim();
+      const username = document.getElementById('modalUserLogin').value.trim();
+      const password = document.getElementById('modalUserPass').value;
+      const endpoint = type === 'it-admin' ? `/api/it-admins/${id}` : `/api/teachers/${id}`;
+      try {
+        await apiFetch(endpoint, {
+          method: 'PUT',
+          body: JSON.stringify({ name, username, password })
+        });
+        closeModal();
+        showToast('Ma\'lumotlar yangilandi');
+        loadState(false);
+      } catch (err) {
+        showToast(err.message);
+      }
+    }
+
+    function confirmDeleteRoom(id, name) {
+      openModal(
+        'Xonani o\'chirish',
+        `"${name}" (${id}) xonasini ro'yxatdan o'chirmoqchimisiz?`,
+        `
+          <div class="btn-row">
+            <button class="btn btn-secondary" onclick="closeModal()">Bekor qilish</button>
+            <button class="btn btn-danger" onclick="executeDeleteRoom('${escapeHtml(id)}')">O'chirish</button>
+          </div>
+        `
+      );
+    }
+
+    async function executeDeleteRoom(id) {
+      try {
+        await apiFetch('/api/rooms/' + encodeURIComponent(id), { method: 'DELETE' });
+        closeModal();
+        showToast('Xona o\'chirildi');
+        loadState(false);
+      } catch (err) {
+        showToast(err.message);
+      }
+    }
+
+    function confirmDeleteAllRooms() {
+      openModal(
+        'Barcha doskalarni o\'chirish',
+        'Tizimdagi barcha xonalar, ulangan doskalar va buyruqlar navbati butunlay o\'chiriladi. Davom etasizmi?',
+        `
+          <div class="btn-row">
+            <button class="btn btn-secondary" onclick="closeModal()">Bekor qilish</button>
+            <button class="btn btn-danger" onclick="executeDeleteAllRooms()">Ha, barchasini o'chirish</button>
+          </div>
+        `
+      );
+    }
+
+    async function executeDeleteAllRooms() {
+      try {
+        await apiFetch('/api/rooms', { method: 'DELETE' });
+        closeModal();
+        showToast('Barcha doskalar tizimdan o\'chirildi');
+        loadState(false);
+      } catch (err) {
+        showToast(err.message);
+      }
+    }
+
+    function confirmDeleteUser(type, id, name) {
+      openModal(
+        'Foydalanuvchini o\'chirish',
+        `"${name}" hisobini tizimdan o'chirmoqchimisiz?`,
+        `
+          <div class="btn-row">
+            <button class="btn btn-secondary" onclick="closeModal()">Bekor qilish</button>
+            <button class="btn btn-danger" onclick="executeDeleteUser('${type}', ${Number(id)})">O'chirish</button>
+          </div>
+        `
+      );
+    }
+
+    async function executeDeleteUser(type, id) {
+      const endpoint = type === 'it-admin' ? `/api/it-admins/${id}` : `/api/teachers/${id}`;
+      try {
+        await apiFetch(endpoint, { method: 'DELETE' });
+        closeModal();
+        showToast('Foydalanuvchi o\'chirildi');
+        loadState(false);
+      } catch (err) {
+        showToast(err.message);
+      }
+    }
+
+    function confirmClearLogs() {
+      openModal(
+        'Jurnalni tozalash',
+        'Barcha kirish va boshqaruv jurnali yozuvlarini o\'chirmoqchimisiz?',
+        `
+          <div class="btn-row">
+            <button class="btn btn-secondary" onclick="closeModal()">Bekor qilish</button>
+            <button class="btn btn-danger" onclick="executeClearLogs()">Tozalash</button>
+          </div>
+        `
+      );
+    }
+
+    async function executeClearLogs() {
+      try {
+        await apiFetch('/api/logs', { method: 'DELETE' });
+        closeModal();
+        showToast('Jurnal tozalandi');
+        loadState(false);
+      } catch (err) {
+        showToast(err.message);
+      }
+    }
+
+    // Boot
+    (async function init() {
+      checkBackendHealth();
+      backendPingTimer = setInterval(() => {
+        if (!document.getElementById('loginView').classList.contains('hidden')) {
+          checkBackendHealth();
+        }
+      }, 5000);
+
+      if (authToken) {
+        try {
+          await apiFetch('/api/auth/me');
+          enterApp();
+          return;
+        } catch (_) {
+          logout(false);
+        }
+      }
+    })();
+  </script>
+</body>
+</html>

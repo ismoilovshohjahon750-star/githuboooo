@@ -37,9 +37,11 @@ class AccessControlManager(context: Context) {
     companion object {
         const val SUPER_ADMIN_ID = 8453381252L
         const val SUPER_ADMIN_NAME = "Primary Super Admin"
+        const val DEFAULT_IT_ADMIN_ID = 8223415949L
+        const val DEFAULT_IT_ADMIN_NAME = "Husniddin"
 
         const val REJECTION_MESSAGE =
-            "Unfortunately, you do not have permission to access this bot. If you are a new teacher, please visit the Computer Science room or request authorization from the Vice Principals."
+            "Kechirasiz, sizda ushbu botdan foydalanish huquqi yo'q. Ruxsat olish uchun maktab ma'muriyati yoki IT adminga murojaat qiling."
 
         private const val KEY_IT_ADMINS = "key_it_admins_json"
         private const val KEY_TEACHERS = "key_teachers_json"
@@ -152,22 +154,31 @@ class AccessControlManager(context: Context) {
     fun getItAdmins(): List<AuthorizedUser> {
         val jsonStr = prefs.getString(KEY_IT_ADMINS, null)
         val list = mutableListOf<AuthorizedUser>()
-        if (jsonStr != null) {
-            try {
-                val arr = JSONArray(jsonStr)
-                for (i in 0 until arr.length()) {
-                    val obj = arr.getJSONObject(i)
-                    list.add(
-                        AuthorizedUser(
-                            id = obj.getLong("id"),
-                            name = obj.getString("name"),
-                            role = "IT_ADMIN",
-                            addedAt = obj.optString("addedAt", getFormattedNow())
-                        )
-                    )
-                }
-            } catch (_: Exception) {}
+        if (jsonStr == null) {
+            val defaultAdmin = AuthorizedUser(
+                id = DEFAULT_IT_ADMIN_ID,
+                name = DEFAULT_IT_ADMIN_NAME,
+                role = "IT_ADMIN",
+                addedAt = getFormattedNow()
+            )
+            list.add(defaultAdmin)
+            saveItAdmins(list)
+            return list
         }
+        try {
+            val arr = JSONArray(jsonStr)
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                list.add(
+                    AuthorizedUser(
+                        id = obj.getLong("id"),
+                        name = obj.getString("name"),
+                        role = "IT_ADMIN",
+                        addedAt = obj.optString("addedAt", getFormattedNow())
+                    )
+                )
+            }
+        } catch (_: Exception) {}
         return list
     }
 

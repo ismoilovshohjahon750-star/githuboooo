@@ -8,6 +8,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -37,6 +38,8 @@ class BoardServerClient(
     private var pollingJob: Job? = null
     @Volatile
     private var currentCall: okhttp3.Call? = null
+    @Volatile
+    private var activeServerUrl: String = SmartBoardConfig.DEFAULT_SERVER_URL
 
     var isPollingActive = false
         private set
@@ -53,6 +56,7 @@ class BoardServerClient(
         val cleanUrl = serverUrl.trim()
             .removeSuffix("/")
             .ifBlank { SmartBoardConfig.DEFAULT_SERVER_URL }
+        activeServerUrl = cleanUrl
 
         pollingJob = scope.launch(Dispatchers.IO) {
             isPollingActive = true
@@ -62,6 +66,7 @@ class BoardServerClient(
             var backoffDelay = 1500L
 
             while (isActive) {
+                var hadError = false
                 try {
                     val config = prefs.loadConfig()
                     val pollPayload = JSONObject().apply {
@@ -96,10 +101,28 @@ class BoardServerClient(
                             val json = JSONObject(bodyString)
                             if (json.optBoolean("status", false) || json.optString("status") == "ok") {
                                 val regRoomName = json.optString("registeredRoomName", "")
+                                val regRoomId = json.optString("registeredRoomId", "")
                                 val isRegistered = json.optBoolean("isRegistered", false)
-                                if (isRegistered && regRoomName.isNotBlank() && regRoomName != config.roomName) {
-                                    Log.i(tag, "Doska xona nomi serverdan yangilandi: $regRoomName")
-                                    prefs.saveConfig(config.copy(roomName = regRoomName, isRegistered = true))
+
+                                if (isRegistered && regRoomName.isNotBlank()) {
+                                    val resolvedId = regRoomId.ifBlank { config.boardId }
+                                    val needsUpdate = !config.isRegistered ||
+                                        regRoomName != config.roomName ||
+                                        resolvedId != config.boardId
+                                    if (needsUpdate) {
+                                        Log.i(tag, "Doska xona ma'lumoti serverdan yangilandi: $regRoomName ($resolvedId)")
+                                        prefs.saveConfig(
+                                            config.copy(
+                                                boardId = resolvedId,
+                                                roomName = regRoomName,
+                                                isRegistered = true
+                                            )
+                                        )
+                                        prefs.setBoardRegistered(true)
+                                        withContext(Dispatchers.Main) {
+                                            LessonSessionManager.onBoardRegisteredFromBot?.invoke(resolvedId, regRoomName)
+                                        }
+                                    }
                                 }
 
                                 val commandObj = json.optJSONObject("command")
@@ -108,14 +131,14 @@ class BoardServerClient(
                                 }
                             }
                         } else {
+                            hadError = true
                             val code = response.code
                             lastStatusMessage = "Server javobi: $code (Kutilmoqda...)"
                             Log.w(tag, "Render server response error: $code")
-                            delay(backoffDelay)
-                            backoffDelay = (backoffDelay * 2).coerceAtMost(10000L)
                         }
                     }
                 } catch (e: Exception) {
+                    hadError = true
                     currentCall = null
                     if (!isActive) break
 
@@ -128,13 +151,16 @@ class BoardServerClient(
                         lastStatusMessage = "Server kutilmoqda..."
                         Log.w(tag, "Server polling error: ${e.message}")
                     }
-                    delay(backoffDelay)
-                    backoffDelay = (backoffDelay * 2).coerceAtMost(10000L)
                 } finally {
                     currentCall = null
                 }
 
-                delay(1500L) // Har 1.5 soniyada server bilan yangilanadi
+                if (hadError) {
+                    delay(backoffDelay)
+                    backoffDelay = (backoffDelay * 2).coerceAtMost(10000L)
+                } else {
+                    delay(1500L)
+                }
             }
 
             isPollingActive = false
@@ -153,7 +179,6 @@ class BoardServerClient(
 
         Log.d(tag, "Server command received: $type (ID: $cmdId) for target: $targetRoomId")
 
-        // Buyruqni tasdiqlash (ACK) va takroriy buyruqlarni filtrdan o'tkazish
         if (cmdId.isNotBlank()) {
             if (executedCommandIds.contains(cmdId)) {
                 acknowledgeCommand(serverUrl, cmdId)
@@ -170,36 +195,85 @@ class BoardServerClient(
             acknowledgeCommand(serverUrl, cmdId)
         }
 
-        when (type) {
-            "UNLOCK" -> {
-                onUnlockRequested(teacherName, durationMinutes, targetRoomId)
-            }
-            "LOCK" -> {
-                onLockRequested(targetRoomId)
-            }
-            "EXTEND" -> {
-                onExtendRequested(minutes)
+        withContext(Dispatchers.Main) {
+            when (type) {
+                "UNLOCK" -> {
+                    onUnlockRequested(teacherName, durationMinutes, targetRoomId)
+                }
+                "LOCK" -> {
+                    onLockRequested(targetRoomId)
+                }
+                "EXTEND" -> {
+                    onExtendRequested(minutes)
+                }
+                "UNREGISTER" -> {
+                    val cfg = prefs.loadConfig()
+                    prefs.saveConfig(cfg.copy(roomName = "", isRegistered = false))
+                    prefs.setBoardRegistered(false)
+                    LessonSessionManager.onBoardUnregisteredFromBot?.invoke()
+                }
             }
         }
     }
 
+    fun requestRegistrationFromServer() {
+        val config = prefs.loadConfig()
+        val url = config.serverUrl.trim().removeSuffix("/").ifBlank { activeServerUrl }
+        val payload = JSONObject().apply {
+            put("mac", deviceMacAddress)
+            put("boardId", config.boardId)
+            put("hardwareId", hardwareId)
+        }
+        postAsync("$url/api/board/request-registration", payload)
+    }
+
+    fun registerBoardOnServer(boardId: String, roomName: String) {
+        val config = prefs.loadConfig()
+        val url = config.serverUrl.trim().removeSuffix("/").ifBlank { activeServerUrl }
+        val payload = JSONObject().apply {
+            put("mac", deviceMacAddress)
+            put("boardId", boardId.ifBlank { config.boardId })
+            put("hardwareId", hardwareId)
+            put("roomName", roomName)
+        }
+        postAsync("$url/api/board/register", payload)
+    }
+
+    fun notifyLessonExpired() {
+        val config = prefs.loadConfig()
+        val url = config.serverUrl.trim().removeSuffix("/").ifBlank { activeServerUrl }
+        val payload = JSONObject().apply {
+            put("mac", deviceMacAddress)
+            put("boardId", config.boardId)
+            put("hardwareId", hardwareId)
+            put("roomName", config.roomName)
+            put("teacherName", LessonSessionManager.teacherName.value)
+        }
+        postAsync("$url/api/board/lesson-expired", payload)
+    }
+
     private fun acknowledgeCommand(serverUrl: String, commandId: String) {
+        val payload = JSONObject().apply {
+            put("commandId", commandId)
+            put("mac", deviceMacAddress)
+        }
+        postAsync("$serverUrl/api/board/ack", payload)
+    }
+
+    private fun postAsync(url: String, payload: JSONObject) {
         try {
-            val payload = JSONObject().apply {
-                put("commandId", commandId)
-                put("mac", deviceMacAddress)
-            }
             val mediaType = "application/json; charset=utf-8".toMediaType()
             val requestBody = payload.toString().toRequestBody(mediaType)
             val request = Request.Builder()
-                .url("$serverUrl/api/board/ack")
+                .url(url)
                 .post(requestBody)
                 .build()
 
             client.newCall(request).enqueue(object : okhttp3.Callback {
                 override fun onFailure(call: okhttp3.Call, e: IOException) {
-                    Log.w(tag, "ACK failed for $commandId: ${e.message}")
+                    Log.w(tag, "POST failed ($url): ${e.message}")
                 }
+
                 override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
                     response.close()
                 }

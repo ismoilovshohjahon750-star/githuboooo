@@ -29,5 +29,8 @@ object LessonSessionManager {
 
     // Yangi doska aniqlanganda yoki botdan xona ro'yxatdan o'tkazilganda
     var onBoardRegisteredFromBot: ((boardId: String, roomName: String) -> Unit)? = null
+    var onBoardUnregisteredFromBot: (() -> Unit)? = null
     var onRequestRegisterNewBoard: ((macAddress: String, androidId: String) -> Unit)? = null
+    var onRegisterBoardToServer: ((boardId: String, roomName: String) -> Unit)? = null
+    var onLessonExpired: (() -> Unit)? = null
 }

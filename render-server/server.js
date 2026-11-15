@@ -1,68 +1,87 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const TelegramBot = require('node-telegram-bot-api');
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 
 const PORT = process.env.PORT || 3000;
-const INITIAL_ADMIN_USERNAME = (process.env.ADMIN_USERNAME || 'admin').trim().toLowerCase();
-const INITIAL_ADMIN_PASSWORD = (process.env.ADMIN_PASSWORD || 'admin1234').trim();
-const INITIAL_IT_PASSWORD = (process.env.IT_ADMIN_PASSWORD || 'admin1234').trim();
+const BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
+const SUPER_ADMIN_ID = parseInt(process.env.SUPER_ADMIN_ID || '8453381252', 10);
+
 const DB_FILE = path.join(__dirname, 'data', 'smartboard_db.json');
+const ONLINE_TIMEOUT_MS = 15000;
+const DIVIDER = '────────────────────';
 
 if (!fs.existsSync(path.join(__dirname, 'data'))) {
   fs.mkdirSync(path.join(__dirname, 'data'), { recursive: true });
 }
 
-function hashPassword(password) {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const derived = crypto.scryptSync(String(password), salt, 64).toString('hex');
-  return `${salt}:${derived}`;
+// ==========================================
+// YORDAMCHI FUNKSIYALAR
+// ==========================================
+function escapeHtml(text) {
+  return String(text || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
-function verifyPassword(password, storedHash) {
-  if (!storedHash || !storedHash.includes(':')) return false;
-  const [salt, originalHex] = storedHash.split(':');
-  if (!salt || !originalHex) return false;
-  try {
-    const derived = crypto.scryptSync(String(password), salt, 64);
-    const original = Buffer.from(originalHex, 'hex');
-    if (derived.length !== original.length) return false;
-    return crypto.timingSafeEqual(derived, original);
-  } catch (_) {
-    return false;
-  }
+function normalizeId(val) {
+  return String(val || '').trim().toUpperCase();
 }
 
-function normalizeUsername(raw, fallback) {
-  const cleaned = String(raw || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]/g, '');
-  return cleaned || fallback;
+function stripColons(val) {
+  return normalizeId(val).replace(/:/g, '');
 }
 
+function isMeaningfulMac(mac) {
+  const clean = normalizeId(mac);
+  return (
+    clean.length >= 10 &&
+    clean !== 'UNKNOWN' &&
+    clean !== 'N/A' &&
+    clean !== '02:00:00:00:00:00'
+  );
+}
+
+function looksLikeMacOrDeviceId(val) {
+  const clean = normalizeId(val);
+  const macRegex = /^([0-9A-F]{2}[:\-]){5}[0-9A-F]{2}$/;
+  const boardRegex = /^BOARD_[A-Z0-9_-]{3,}$/;
+  return macRegex.test(clean) || boardRegex.test(clean);
+}
+
+function isValidDeviceIdInput(val) {
+  const clean = normalizeId(val);
+  return clean.length >= 4 && clean.length <= 64 && /^[A-Z0-9_:-]+$/.test(clean);
+}
+
+function getFormattedTime() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  const date = `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+  return `${time}/${date}`;
+}
+
+function getRoleLabel(role) {
+  if (role === 'SUPER_ADMIN') return 'Bosh Super Admin';
+  if (role === 'IT_ADMIN') return 'IT Admin';
+  if (role === 'TEACHER') return 'O\'qituvchi';
+  return 'Foydalanuvchi';
+}
+
+// ==========================================
+// MA'LUMOTLAR BAZASI
+// ==========================================
 function loadDatabase() {
-  const defaultSessionSecret = crypto.randomBytes(32).toString('hex');
   const defaultItAdmins = [
-    {
-      id: 8223415949,
-      username: 'husniddin',
-      name: 'Husniddin',
-      passwordHash: hashPassword(INITIAL_IT_PASSWORD),
-      addedAt: getFormattedTime()
-    }
+    { id: 8223415949, name: 'Husniddin', addedAt: getFormattedTime() }
   ];
 
   const defaultData = {
-    sessionSecret: defaultSessionSecret,
-    superAdmin: {
-      id: 1,
-      username: INITIAL_ADMIN_USERNAME || 'admin',
-      name: 'Bosh Admin',
-      passwordHash: hashPassword(INITIAL_ADMIN_PASSWORD)
-    },
+    superAdminId: SUPER_ADMIN_ID,
     itAdmins: defaultItAdmins,
     teachers: [],
     rooms: [],
@@ -73,74 +92,33 @@ function loadDatabase() {
     if (fs.existsSync(DB_FILE)) {
       const content = fs.readFileSync(DB_FILE, 'utf8');
       const parsed = JSON.parse(content);
-      let migrated = false;
 
       if (Array.isArray(parsed.rooms)) {
         parsed.rooms = parsed.rooms.filter(
-          (r) => r && r.id && !r.id.includes('Yangi') && r.name !== 'Yangi xona qo\'shish' && r.id.length >= 4
+          (r) =>
+            r &&
+            r.id &&
+            !String(r.id).includes('Yangi') &&
+            r.name !== 'Yangi xona qo\'shish' &&
+            String(r.id).trim().length >= 4
         );
-      } else {
-        parsed.rooms = [];
-      }
-
-      if (!parsed.sessionSecret) {
-        parsed.sessionSecret = defaultSessionSecret;
-        migrated = true;
-      }
-
-      if (!parsed.superAdmin || !parsed.superAdmin.passwordHash) {
-        parsed.superAdmin = defaultData.superAdmin;
-        migrated = true;
       }
 
       const mergedItAdmins = Array.isArray(parsed.itAdmins) ? [...parsed.itAdmins] : [];
       for (const admin of defaultItAdmins) {
         if (!mergedItAdmins.some((a) => Number(a.id) === Number(admin.id))) {
           mergedItAdmins.push(admin);
-          migrated = true;
         }
       }
-      parsed.itAdmins = mergedItAdmins.map((a, idx) => {
-        const next = { ...a };
-        if (!next.id) {
-          next.id = Date.now() + idx;
-          migrated = true;
-        }
-        if (!next.username) {
-          next.username = normalizeUsername(next.name, `itadmin${next.id}`);
-          migrated = true;
-        }
-        if (!next.passwordHash) {
-          next.passwordHash = hashPassword(INITIAL_IT_PASSWORD);
-          migrated = true;
-        }
-        return next;
-      });
 
-      parsed.teachers = (Array.isArray(parsed.teachers) ? parsed.teachers : []).map((t, idx) => {
-        const next = { ...t };
-        if (!next.id) {
-          next.id = Date.now() + idx;
-          migrated = true;
-        }
-        if (!next.username) {
-          next.username = normalizeUsername(next.name, `teacher${next.id}`);
-          migrated = true;
-        }
-        if (!next.passwordHash) {
-          next.passwordHash = hashPassword('123456');
-          migrated = true;
-        }
-        return next;
-      });
-
-      if (!Array.isArray(parsed.logs)) {
-        parsed.logs = [];
-      }
-
-      const finalDb = { ...defaultData, ...parsed };
-      if (migrated) saveDatabase(finalDb);
-      return finalDb;
+      const finalData = {
+        ...defaultData,
+        ...parsed,
+        itAdmins: mergedItAdmins,
+        superAdminId: SUPER_ADMIN_ID
+      };
+      saveDatabase(finalData);
+      return finalData;
     }
   } catch (err) {
     console.error('Baza yuklashda xatolik:', err);
@@ -158,23 +136,14 @@ function saveDatabase(data) {
   }
 }
 
-function getFormattedTime() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, '0');
-  const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-  const date = `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
-  return `${time}/${date}`;
-}
-
 const db = loadDatabase();
-const SESSION_SECRET = (process.env.SESSION_SECRET || db.sessionSecret).trim();
 
 function logAccess(userId, userName, role, action) {
   const entry = {
     timestamp: getFormattedTime(),
     userId: Number(userId) || 0,
-    userName: userName || 'Noma\'lum',
-    role: role || 'Foydalanuvchi',
+    userName: userName || 'Tizim',
+    role: getRoleLabel(role) || role || 'Foydalanuvchi',
     action: action || ''
   };
   db.logs.unshift(entry);
@@ -182,131 +151,164 @@ function logAccess(userId, userName, role, action) {
   saveDatabase(db);
 }
 
-function createSessionToken(user) {
-  const payloadObj = {
-    id: user.id,
-    role: user.role,
-    username: user.username,
-    exp: Date.now() + 7 * 24 * 60 * 60 * 1000
-  };
-  const payloadB64 = Buffer.from(JSON.stringify(payloadObj), 'utf8').toString('base64url');
-  const sig = crypto.createHmac('sha256', SESSION_SECRET).update(payloadB64).digest('base64url');
-  return `${payloadB64}.${sig}`;
-}
-
-function resolveUserByRoleAndId(role, id) {
-  const numId = Number(id);
-  if (role === 'SUPER_ADMIN' && Number(db.superAdmin.id) === numId) {
-    return { ...db.superAdmin, role: 'SUPER_ADMIN' };
+function checkUserRole(userId) {
+  const numId = Number(userId);
+  if (numId === SUPER_ADMIN_ID) {
+    return { isAuthorized: true, role: 'SUPER_ADMIN', name: 'Bosh Admin' };
   }
-  if (role === 'IT_ADMIN') {
-    const it = db.itAdmins.find((a) => Number(a.id) === numId);
-    if (it) return { ...it, role: 'IT_ADMIN' };
-  }
-  if (role === 'TEACHER') {
-    const t = db.teachers.find((tc) => Number(tc.id) === numId);
-    if (t) return { ...t, role: 'TEACHER' };
-  }
-  return null;
-}
-
-function verifySessionToken(token) {
-  if (!token || !token.includes('.')) return null;
-  const [payloadB64, sig] = token.split('.');
-  if (!payloadB64 || !sig) return null;
-
-  const expectedSig = crypto.createHmac('sha256', SESSION_SECRET).update(payloadB64).digest('base64url');
-  const a = Buffer.from(sig, 'utf8');
-  const b = Buffer.from(expectedSig, 'utf8');
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
-
-  try {
-    const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
-    if (!payload.exp || payload.exp < Date.now()) return null;
-    return resolveUserByRoleAndId(payload.role, payload.id);
-  } catch (_) {
-    return null;
-  }
-}
-
-function findUserByLogin(loginInput) {
-  const clean = String(loginInput || '').trim().toLowerCase();
-  if (!clean) return null;
-
-  if (db.superAdmin.username.toLowerCase() === clean) {
-    return { ...db.superAdmin, role: 'SUPER_ADMIN' };
-  }
-  const it = db.itAdmins.find(
-    (a) => (a.username && a.username.toLowerCase() === clean) || String(a.id) === clean
-  );
-  if (it) return { ...it, role: 'IT_ADMIN' };
-
-  const tc = db.teachers.find(
-    (t) => (t.username && t.username.toLowerCase() === clean) || String(t.id) === clean
-  );
-  if (tc) return { ...tc, role: 'TEACHER' };
-
-  return null;
-}
-
-function isUsernameTaken(username, excludeRole = null, excludeId = null) {
-  const clean = username.toLowerCase();
-  if (
-    db.superAdmin.username.toLowerCase() === clean &&
-    !(excludeRole === 'SUPER_ADMIN' && Number(db.superAdmin.id) === Number(excludeId))
-  ) {
-    return true;
-  }
-  if (
-    db.itAdmins.some(
-      (a) => a.username.toLowerCase() === clean && !(excludeRole === 'IT_ADMIN' && Number(a.id) === Number(excludeId))
-    )
-  ) {
-    return true;
-  }
-  if (
-    db.teachers.some(
-      (t) => t.username.toLowerCase() === clean && !(excludeRole === 'TEACHER' && Number(t.id) === Number(excludeId))
-    )
-  ) {
-    return true;
-  }
-  return false;
-}
-
-function generateNumericId() {
-  return Date.now() + Math.floor(Math.random() * 1000);
+  const it = db.itAdmins.find((a) => Number(a.id) === numId);
+  if (it) return { isAuthorized: true, role: 'IT_ADMIN', name: it.name };
+  const t = db.teachers.find((tc) => Number(tc.id) === numId);
+  if (t) return { isAuthorized: true, role: 'TEACHER', name: t.name };
+  return { isAuthorized: false, role: 'UNAUTHORIZED' };
 }
 
 // ==========================================
-// DOSKALAR VA BUYRUQLAR XOTIRASI
+// DOSKALAR, NAVBATLAR VA SESSIYALAR XOTIRASI
 // ==========================================
 const connectedBoards = new Map();
 const boardQueues = new Map();
-const newlyDetectedHistory = new Map();
+const notifiedNewBoards = new Set();
+const activeLessons = new Map(); // boardKeyOrRoomId -> { chatId, teacherName, roomTitle, startedAt }
+const chatStates = new Map();    // chatId -> { step, payload, updatedAt }
 
 function resolveBoardKey(mac, boardId, hardwareId, ip) {
-  const cleanMac = (mac || '').trim().toUpperCase();
-  const cleanBoardId = (boardId || '').trim().toUpperCase();
-  const cleanHwId = (hardwareId || '').trim().toUpperCase();
+  const cleanMac = normalizeId(mac);
+  const cleanBoardId = normalizeId(boardId);
+  const cleanHwId = normalizeId(hardwareId);
 
-  if (cleanMac && cleanMac !== 'UNKNOWN' && cleanMac.length >= 10 && cleanMac !== '02:00:00:00:00:00') {
+  if (isMeaningfulMac(cleanMac)) {
     return cleanMac;
   }
-  if (cleanBoardId && cleanBoardId.startsWith('BOARD_')) {
+  if (cleanBoardId && cleanBoardId !== 'UNKNOWN' && cleanBoardId !== 'N/A') {
     return cleanBoardId;
   }
-  if (cleanHwId && cleanHwId !== 'UNKNOWN') {
+  if (cleanHwId && cleanHwId !== 'UNKNOWN' && cleanHwId !== 'N/A') {
     return cleanHwId;
   }
-  return cleanBoardId || cleanHwId || `BOARD_IP_${(ip || 'LOCAL').replace(/[^a-zA-Z0-9]/g, '_')}`;
+  return `BOARD_IP_${String(ip || 'LOCAL').replace(/[^a-zA-Z0-9]/g, '_')}`;
+}
+
+function findRoomForDevice({ mac, boardId, hardwareId, boardKey, roomName }) {
+  const candidates = [boardKey, mac, boardId, hardwareId]
+    .map(normalizeId)
+    .filter((v) => v && v !== 'UNKNOWN' && v !== 'N/A' && v !== '02:00:00:00:00:00');
+  const candidateNoColons = candidates.map(stripColons);
+
+  const byId = db.rooms.find((r) => {
+    const rId = normalizeId(r.id);
+    const rBound = normalizeId(r.boundBoardKey);
+    const rIdNoColon = stripColons(rId);
+    return (
+      candidates.includes(rId) ||
+      (rBound && candidates.includes(rBound)) ||
+      (rIdNoColon.length >= 6 && candidateNoColons.includes(rIdNoColon))
+    );
+  });
+  if (byId) return byId;
+
+  const cleanRoomName = String(roomName || '').trim().toLowerCase();
+  if (cleanRoomName && cleanRoomName !== 'noma\'lum xona' && cleanRoomName !== 'biriktirilmagan') {
+    return db.rooms.find(
+      (r) =>
+        r.name &&
+        r.name.trim().toLowerCase() === cleanRoomName &&
+        (!r.boundBoardKey || candidates.includes(normalizeId(r.boundBoardKey)))
+    ) || null;
+  }
+  return null;
+}
+
+function findConnectedBoardForRoom(room) {
+  if (!room) return null;
+  const rId = normalizeId(room.id);
+  const rBound = normalizeId(room.boundBoardKey);
+  const rIdNoColon = stripColons(rId);
+
+  if (connectedBoards.has(rId)) {
+    return { key: rId, board: connectedBoards.get(rId) };
+  }
+  if (rBound && connectedBoards.has(rBound)) {
+    return { key: rBound, board: connectedBoards.get(rBound) };
+  }
+
+  for (const [key, b] of connectedBoards.entries()) {
+    const ids = [key, b.roomId, b.mac, b.boardId, b.hardwareId].map(normalizeId);
+    const idsNoColon = ids.map(stripColons);
+    if (
+      ids.includes(rId) ||
+      (rBound && ids.includes(rBound)) ||
+      (rIdNoColon.length >= 6 && idsNoColon.includes(rIdNoColon))
+    ) {
+      return { key, board: b };
+    }
+  }
+  return null;
+}
+
+function isBoardOnline(board, now = Date.now()) {
+  return Boolean(board && now - board.lastSeen < ONLINE_TIMEOUT_MS);
+}
+
+function getUnassignedBoards() {
+  const list = [];
+  for (const [key, b] of connectedBoards.entries()) {
+    const matched = findRoomForDevice({
+      mac: b.mac,
+      boardId: b.boardId,
+      hardwareId: b.hardwareId,
+      boardKey: key,
+      roomName: b.roomName
+    });
+    if (!matched) {
+      list.push({ key, board: b });
+    }
+  }
+  return list;
+}
+
+function upsertRoom(rawId, rawName, addedBy, boundBoardKey = null) {
+  const cleanId = normalizeId(rawId);
+  const cleanName = String(rawName || '').trim();
+  const existingIdx = db.rooms.findIndex(
+    (r) => normalizeId(r.id) === cleanId || (stripColons(r.id).length >= 6 && stripColons(r.id) === stripColons(cleanId))
+  );
+
+  const nowStr = getFormattedTime();
+  if (existingIdx !== -1) {
+    db.rooms[existingIdx].id = cleanId;
+    db.rooms[existingIdx].name = cleanName;
+    db.rooms[existingIdx].addedBy = addedBy;
+    db.rooms[existingIdx].addedAt = nowStr;
+    if (boundBoardKey) db.rooms[existingIdx].boundBoardKey = normalizeId(boundBoardKey);
+  } else {
+    const newRoom = {
+      id: cleanId,
+      name: cleanName,
+      addedBy,
+      addedAt: nowStr
+    };
+    if (boundBoardKey) newRoom.boundBoardKey = normalizeId(boundBoardKey);
+    db.rooms.push(newRoom);
+  }
+  saveDatabase(db);
+
+  // Ulangan doskalardagi keshni ham darhol yangilash
+  for (const [key, b] of connectedBoards.entries()) {
+    const ids = [key, b.mac, b.boardId, b.hardwareId, b.roomId].map(normalizeId);
+    if (ids.includes(cleanId) || ids.map(stripColons).includes(stripColons(cleanId))) {
+      b.roomId = cleanId;
+      b.roomName = cleanName;
+      b.isRegistered = true;
+      notifiedNewBoards.delete(key);
+    }
+  }
+  notifiedNewBoards.delete(cleanId);
 }
 
 function enqueueCommandForTarget(target, command) {
-  const cleanTarget = String(target || '').trim().toUpperCase();
-  if (!cleanTarget || cleanTarget === 'ALL') {
-    return null;
-  }
+  const cleanTarget = normalizeId(target || 'ALL');
+  const isAll = cleanTarget === 'ALL' || cleanTarget === '';
 
   const cmdId = `cmd_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
   const baseCmd = {
@@ -316,36 +318,59 @@ function enqueueCommandForTarget(target, command) {
     targetRoomId: cleanTarget
   };
 
-  const matchedBoardKeys = new Set();
-  matchedBoardKeys.add(cleanTarget);
+  if (isAll) {
+    const allKeys = new Set();
+    for (const key of connectedBoards.keys()) allKeys.add(key);
+    for (const r of db.rooms) allKeys.add(normalizeId(r.id));
+
+    for (const key of allKeys) {
+      if (!boardQueues.has(key)) boardQueues.set(key, []);
+      boardQueues.get(key).push({ ...baseCmd, targetKey: key });
+    }
+    return baseCmd;
+  }
+
+  const matchedBoardKeys = new Set([cleanTarget]);
+  const cleanTargetNoColon = stripColons(cleanTarget);
 
   const matchedRooms = db.rooms.filter((r) => {
-    const rId = r.id.trim().toUpperCase();
-    const rName = r.name.trim().toUpperCase();
+    const rId = normalizeId(r.id);
+    const rName = normalizeId(r.name);
     return (
       rId === cleanTarget ||
       rName === cleanTarget ||
-      rId.replace(/:/g, '') === cleanTarget.replace(/:/g, '')
+      (cleanTargetNoColon.length >= 6 && stripColons(rId) === cleanTargetNoColon)
     );
   });
 
   for (const r of matchedRooms) {
-    matchedBoardKeys.add(r.id.trim().toUpperCase());
+    matchedBoardKeys.add(normalizeId(r.id));
+    if (r.boundBoardKey) matchedBoardKeys.add(normalizeId(r.boundBoardKey));
   }
 
   for (const [key, b] of connectedBoards.entries()) {
-    const bKey = key.toUpperCase();
-    const bMac = (b.mac || '').toUpperCase();
-    const bBoardId = (b.boardId || '').toUpperCase();
-    const bRoomName = (b.roomName || '').trim().toUpperCase();
+    const bKey = normalizeId(key);
+    const bMac = normalizeId(b.mac);
+    const bBoardId = normalizeId(b.boardId);
+    const bHwId = normalizeId(b.hardwareId);
+    const bRoomId = normalizeId(b.roomId);
+    const bRoomName = normalizeId(b.roomName);
 
     const matchesThisBoard =
       bKey === cleanTarget ||
       bMac === cleanTarget ||
       bBoardId === cleanTarget ||
+      bHwId === cleanTarget ||
+      bRoomId === cleanTarget ||
       (bRoomName && bRoomName === cleanTarget) ||
-      (bMac && bMac.replace(/:/g, '') === cleanTarget.replace(/:/g, '')) ||
-      matchedRooms.some((r) => r.id.toUpperCase() === bKey || (bRoomName && r.name.trim().toUpperCase() === bRoomName));
+      (cleanTargetNoColon.length >= 6 &&
+        [bKey, bMac, bBoardId, bRoomId].map(stripColons).includes(cleanTargetNoColon)) ||
+      matchedRooms.some(
+        (r) =>
+          normalizeId(r.id) === bKey ||
+          normalizeId(r.id) === bRoomId ||
+          (bRoomName && normalizeId(r.name) === bRoomName)
+      );
 
     if (matchesThisBoard) {
       matchedBoardKeys.add(bKey);
@@ -360,408 +385,81 @@ function enqueueCommandForTarget(target, command) {
   return baseCmd;
 }
 
+function broadcastCommand(command) {
+  return enqueueCommandForTarget('ALL', command);
+}
+
+function trackActiveLesson(target, chatId, teacherName, roomTitle) {
+  const cleanTarget = normalizeId(target || 'ALL');
+  const sessionInfo = {
+    chatId,
+    teacherName,
+    roomTitle,
+    startedAt: Date.now()
+  };
+  activeLessons.set(cleanTarget, sessionInfo);
+  const room = db.rooms.find((r) => normalizeId(r.id) === cleanTarget);
+  if (room) {
+    const found = findConnectedBoardForRoom(room);
+    if (found) activeLessons.set(normalizeId(found.key), sessionInfo);
+  }
+}
+
 // ==========================================
 // EXPRESS SERVER SOZLAMALARI
 // ==========================================
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
-app.use('/webapp', express.static(path.join(__dirname, 'public')));
 
-function requireAuth(req, res, next) {
-  const authHeader = req.headers.authorization || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
-  const user = verifySessionToken(token);
-  if (!user) {
-    return res.status(401).json({ error: 'Tizimga qayta kiring (sessiya tugagan)' });
-  }
-  req.authUser = {
-    id: user.id,
-    username: user.username,
-    name: user.name,
-    role: user.role
+let bot = null;
+let is401Reported = false;
+let botUsername = '';
+
+function notifyAdminsNewBoard(boardKey, ipAddress, details = {}, force = false) {
+  if (!bot) return;
+  if (!force && notifiedNewBoards.has(boardKey)) return;
+  notifiedNewBoards.add(boardKey);
+
+  const macDisplay = isMeaningfulMac(details.mac) ? details.mac : boardKey;
+  const text =
+    `<b>[Yangi Doska] Yangi interaktiv doska aniqlandi</b>\n` +
+    `${DIVIDER}\n` +
+    `Qurilma ID: <code>${escapeHtml(macDisplay)}</code>\n` +
+    (details.boardId && details.boardId !== macDisplay && details.boardId !== 'N/A'
+      ? `Doska kodi: <code>${escapeHtml(details.boardId)}</code>\n`
+      : '') +
+    (ipAddress ? `IP manzil: <code>${escapeHtml(ipAddress)}</code>\n` : '') +
+    `Aniqlangan vaqt: <code>${getFormattedTime()}</code>\n\n` +
+    `Ushbu doskaga xona nomini biriktirish uchun quyidagi tugmani bosing:`;
+
+  const replyMarkup = {
+    inline_keyboard: [
+      [{ text: 'Xona nomini kiritish', callback_data: `cmd_setup_board:${macDisplay}` }],
+      [{ text: 'Doskalar holatini ko\'rish', callback_data: 'show_board_list' }]
+    ]
   };
-  next();
+
+  const adminIds = new Set([SUPER_ADMIN_ID, ...db.itAdmins.map((a) => Number(a.id))]);
+  for (const adminId of adminIds) {
+    bot.sendMessage(adminId, text, { parse_mode: 'HTML', reply_markup: replyMarkup }).catch(() => {});
+  }
 }
 
-function requireAdmin(req, res, next) {
-  if (req.authUser.role !== 'SUPER_ADMIN' && req.authUser.role !== 'IT_ADMIN') {
-    return res.status(403).json({ error: 'Bu amal faqat Super Admin va IT Adminlar uchun' });
-  }
-  next();
-}
-
-function requireSuperAdmin(req, res, next) {
-  if (req.authUser.role !== 'SUPER_ADMIN') {
-    return res.status(403).json({ error: 'Bu amal faqat Bosh Admin (Super Admin) uchun' });
-  }
-  next();
-}
-
-// ==========================================
-// AVTORIZATSIYA API
-// ==========================================
-app.post('/api/auth/login', (req, res) => {
-  const username = String(req.body?.username || '').trim();
-  const password = String(req.body?.password || '');
-
-  if (!username || !password) {
-    return res.status(400).json({ error: 'Login va parolni kiriting' });
-  }
-
-  const user = findUserByLogin(username);
-  if (!user || !verifyPassword(password, user.passwordHash)) {
-    return res.status(401).json({ error: 'Login yoki parol noto\'g\'ri' });
-  }
-
-  const safeUser = {
-    id: user.id,
-    username: user.username,
-    name: user.name,
-    role: user.role
-  };
-  const token = createSessionToken(safeUser);
-  logAccess(safeUser.id, safeUser.name, safeUser.role, 'Veb-saytga kirdi');
-  res.json({ token, user: safeUser });
-});
-
-app.get('/api/auth/me', requireAuth, (req, res) => {
-  res.json({ user: req.authUser });
-});
-
-app.post('/api/auth/change-password', requireAuth, (req, res) => {
-  const currentPassword = String(req.body?.currentPassword || '');
-  const newPassword = String(req.body?.newPassword || '');
-
-  if (!currentPassword || newPassword.length < 4) {
-    return res.status(400).json({ error: 'Joriy parol va kamida 4 belgili yangi parolni kiriting' });
-  }
-
-  const { role, id } = req.authUser;
-  let targetRecord = null;
-  if (role === 'SUPER_ADMIN') {
-    targetRecord = db.superAdmin;
-  } else if (role === 'IT_ADMIN') {
-    targetRecord = db.itAdmins.find((a) => Number(a.id) === Number(id));
-  } else if (role === 'TEACHER') {
-    targetRecord = db.teachers.find((t) => Number(t.id) === Number(id));
-  }
-
-  if (!targetRecord || !verifyPassword(currentPassword, targetRecord.passwordHash)) {
-    return res.status(400).json({ error: 'Joriy parol noto\'g\'ri' });
-  }
-
-  targetRecord.passwordHash = hashPassword(newPassword);
-  saveDatabase(db);
-  logAccess(req.authUser.id, req.authUser.name, req.authUser.role, 'Parol yangilandi');
-  res.json({ status: 'ok' });
-});
-
-// ==========================================
-// VEB BOSHQARUV PANELI API
-// ==========================================
-app.get('/api/state', requireAuth, (req, res) => {
+app.get('/', (req, res) => {
   const now = Date.now();
-  const boards = [];
-  const unassignedBoards = [];
-
-  for (const [key, b] of connectedBoards.entries()) {
-    const isOnline = now - b.lastSeen < 15000;
-    const item = { ...b, boardKey: key, isOnline };
-    boards.push(item);
-    const isReg = db.rooms.some((r) => r.id.toUpperCase() === key.toUpperCase());
-    if (!isReg) {
-      unassignedBoards.push({
-        ...item,
-        detectedAt: newlyDetectedHistory.get(key) || getFormattedTime()
-      });
-    }
+  let onlineBoardsCount = 0;
+  for (const b of connectedBoards.values()) {
+    if (isBoardOnline(b, now)) onlineBoardsCount++;
   }
-
-  const isAdmin = req.authUser.role === 'SUPER_ADMIN' || req.authUser.role === 'IT_ADMIN';
-  const isSuperAdmin = req.authUser.role === 'SUPER_ADMIN';
-
-  const safeTeachers = isAdmin
-    ? db.teachers.map((t) => ({ id: t.id, username: t.username, name: t.name, addedAt: t.addedAt }))
-    : [];
-  const safeItAdmins = isSuperAdmin
-    ? db.itAdmins.map((a) => ({ id: a.id, username: a.username, name: a.name, addedAt: a.addedAt }))
-    : [];
-
-  res.json({
-    user: req.authUser,
-    serverTime: getFormattedTime(),
-    rooms: db.rooms,
-    boards,
-    unassignedBoards: isAdmin ? unassignedBoards : [],
-    teachers: safeTeachers,
-    itAdmins: safeItAdmins,
-    logs: isAdmin ? db.logs.slice(0, 100) : []
-  });
-});
-
-app.post('/api/boards/action', requireAuth, (req, res) => {
-  const { action, targetRoomId, durationMinutes } = req.body || {};
-  const target = String(targetRoomId || '').trim().toUpperCase();
-
-  if (!target || target === 'ALL') {
-    return res.status(400).json({ error: 'Iltimos, aniq bitta doskani tanlang' });
-  }
-
-  const room = db.rooms.find((r) => r.id.toUpperCase() === target);
-  const roomTitle = room ? room.name : target;
-  const { id: userId, name: displayName, role } = req.authUser;
-
-  if (action === 'unlock') {
-    const mins = Math.min(Math.max(parseInt(durationMinutes, 10) || 45, 5), 180);
-    enqueueCommandForTarget(target, {
-      type: 'UNLOCK',
-      teacherName: displayName,
-      durationMinutes: mins,
-      targetRoomId: target
-    });
-    logAccess(userId, displayName, role, `Dars boshlandi: ${roomTitle} (${mins} daqiqa)`);
-    return res.json({ status: 'ok', durationMinutes: mins });
-  }
-
-  if (action === 'lock') {
-    enqueueCommandForTarget(target, { type: 'LOCK', targetRoomId: target });
-    logAccess(userId, displayName, role, `Doska qulflandi: ${roomTitle}`);
-    return res.json({ status: 'ok' });
-  }
-
-  if (action === 'extend') {
-    enqueueCommandForTarget(target, { type: 'EXTEND', minutes: 10, targetRoomId: target });
-    logAccess(userId, displayName, role, `+10 daqiqa qo'shildi: ${roomTitle}`);
-    return res.json({ status: 'ok' });
-  }
-
-  return res.status(400).json({ error: 'Noto\'g\'ri amal' });
-});
-
-// Xonalar CRUD
-app.post('/api/rooms', requireAuth, requireAdmin, (req, res) => {
-  const roomId = String(req.body?.id || '').trim().toUpperCase();
-  const roomName = String(req.body?.name || '').trim();
-  if (!roomId || roomId.length < 4 || roomName.length < 2) {
-    return res.status(400).json({ error: 'Qurilma ID (kamida 4 belgi) va xona nomi (kamida 2 belgi) kiritilishi kerak' });
-  }
-
-  const existing = db.rooms.find((r) => r.id.toUpperCase() === roomId);
-  if (existing) {
-    existing.name = roomName;
-    existing.addedBy = req.authUser.name;
-    existing.addedAt = getFormattedTime();
-  } else {
-    db.rooms.push({
-      id: roomId,
-      name: roomName,
-      addedBy: req.authUser.name,
-      addedAt: getFormattedTime()
-    });
-  }
-  newlyDetectedHistory.delete(roomId);
-  saveDatabase(db);
-  logAccess(req.authUser.id, req.authUser.name, req.authUser.role, `Xona saqlandi: ${roomName} (${roomId})`);
-  res.json({ status: 'ok' });
-});
-
-app.put('/api/rooms/:id', requireAuth, requireAdmin, (req, res) => {
-  const targetId = String(req.params.id || '').trim().toUpperCase();
-  const roomName = String(req.body?.name || '').trim();
-  if (roomName.length < 2) {
-    return res.status(400).json({ error: 'Xona nomi kamida 2 belgidan iborat bo\'lishi kerak' });
-  }
-  const existing = db.rooms.find((r) => r.id.toUpperCase() === targetId);
-  if (!existing) {
-    return res.status(404).json({ error: 'Xona topilmadi' });
-  }
-  const oldName = existing.name;
-  existing.name = roomName;
-  saveDatabase(db);
-  logAccess(req.authUser.id, req.authUser.name, req.authUser.role, `Xona tahrirlandi: ${oldName} -> ${roomName}`);
-  res.json({ status: 'ok' });
-});
-
-app.delete('/api/rooms/:id', requireAuth, requireAdmin, (req, res) => {
-  const targetId = String(req.params.id || '').trim().toUpperCase();
-  const idx = db.rooms.findIndex((r) => r.id.toUpperCase() === targetId);
-  if (idx === -1) {
-    return res.status(404).json({ error: 'Xona topilmadi' });
-  }
-  const removed = db.rooms.splice(idx, 1)[0];
-  boardQueues.delete(targetId);
-  newlyDetectedHistory.delete(targetId);
-  saveDatabase(db);
-  logAccess(req.authUser.id, req.authUser.name, req.authUser.role, `Xona o'chirildi: ${removed.name}`);
-  res.json({ status: 'ok' });
-});
-
-app.delete('/api/rooms', requireAuth, requireAdmin, (req, res) => {
-  const count = db.rooms.length;
-  db.rooms = [];
-  connectedBoards.clear();
-  boardQueues.clear();
-  newlyDetectedHistory.clear();
-  saveDatabase(db);
-  logAccess(req.authUser.id, req.authUser.name, req.authUser.role, `Barcha doskalar tizimdan butunlay o'chirildi (${count} ta)`);
-  res.json({ status: 'ok', deletedCount: count });
-});
-
-// O'qituvchilar CRUD
-app.post('/api/teachers', requireAuth, requireAdmin, (req, res) => {
-  const name = String(req.body?.name || '').trim();
-  const username = normalizeUsername(req.body?.username, '');
-  const password = String(req.body?.password || '').trim();
-
-  if (!name || !username || password.length < 4) {
-    return res.status(400).json({ error: 'F.I.SH, login va kamida 4 belgili parol kiritilishi kerak' });
-  }
-  if (isUsernameTaken(username)) {
-    return res.status(400).json({ error: 'Ushbu login allaqachon band' });
-  }
-
-  const newTeacher = {
-    id: generateNumericId(),
-    username,
-    name,
-    passwordHash: hashPassword(password),
-    addedAt: getFormattedTime()
-  };
-  db.teachers.push(newTeacher);
-  saveDatabase(db);
-  logAccess(req.authUser.id, req.authUser.name, req.authUser.role, `O'qituvchi qo'shildi: ${name} (@${username})`);
-  res.json({ status: 'ok' });
-});
-
-app.put('/api/teachers/:id', requireAuth, requireAdmin, (req, res) => {
-  const targetId = Number(req.params.id);
-  const teacher = db.teachers.find((t) => Number(t.id) === targetId);
-  if (!teacher) {
-    return res.status(404).json({ error: 'O\'qituvchi topilmadi' });
-  }
-
-  const name = String(req.body?.name || teacher.name).trim();
-  const username = req.body?.username ? normalizeUsername(req.body.username, teacher.username) : teacher.username;
-  const password = String(req.body?.password || '').trim();
-
-  if (!name || !username) {
-    return res.status(400).json({ error: 'F.I.SH va login bo\'sh bo\'lmasligi kerak' });
-  }
-  if (isUsernameTaken(username, 'TEACHER', targetId)) {
-    return res.status(400).json({ error: 'Ushbu login allaqachon band' });
-  }
-  if (password && password.length < 4) {
-    return res.status(400).json({ error: 'Yangi parol kamida 4 belgidan iborat bo\'lishi kerak' });
-  }
-
-  teacher.name = name;
-  teacher.username = username;
-  if (password) {
-    teacher.passwordHash = hashPassword(password);
-  }
-  saveDatabase(db);
-  logAccess(req.authUser.id, req.authUser.name, req.authUser.role, `O'qituvchi yangilandi: ${name}`);
-  res.json({ status: 'ok' });
-});
-
-app.delete('/api/teachers/:id', requireAuth, requireAdmin, (req, res) => {
-  const targetId = Number(req.params.id);
-  const idx = db.teachers.findIndex((t) => Number(t.id) === targetId);
-  if (idx === -1) {
-    return res.status(404).json({ error: 'O\'qituvchi topilmadi' });
-  }
-  const removed = db.teachers.splice(idx, 1)[0];
-  saveDatabase(db);
-  logAccess(req.authUser.id, req.authUser.name, req.authUser.role, `O'qituvchi o'chirildi: ${removed.name}`);
-  res.json({ status: 'ok' });
-});
-
-// IT Adminlar CRUD (Faqat Bosh Admin uchun)
-app.post('/api/it-admins', requireAuth, requireSuperAdmin, (req, res) => {
-  const name = String(req.body?.name || '').trim();
-  const username = normalizeUsername(req.body?.username, '');
-  const password = String(req.body?.password || '').trim();
-
-  if (!name || !username || password.length < 4) {
-    return res.status(400).json({ error: 'F.I.SH, login va kamida 4 belgili parol kiritilishi kerak' });
-  }
-  if (isUsernameTaken(username)) {
-    return res.status(400).json({ error: 'Ushbu login allaqachon band' });
-  }
-
-  db.itAdmins.push({
-    id: generateNumericId(),
-    username,
-    name,
-    passwordHash: hashPassword(password),
-    addedAt: getFormattedTime()
-  });
-  saveDatabase(db);
-  logAccess(req.authUser.id, req.authUser.name, req.authUser.role, `IT Admin qo'shildi: ${name} (@${username})`);
-  res.json({ status: 'ok' });
-});
-
-app.put('/api/it-admins/:id', requireAuth, requireSuperAdmin, (req, res) => {
-  const targetId = Number(req.params.id);
-  const admin = db.itAdmins.find((a) => Number(a.id) === targetId);
-  if (!admin) {
-    return res.status(404).json({ error: 'IT Admin topilmadi' });
-  }
-
-  const name = String(req.body?.name || admin.name).trim();
-  const username = req.body?.username ? normalizeUsername(req.body.username, admin.username) : admin.username;
-  const password = String(req.body?.password || '').trim();
-
-  if (!name || !username) {
-    return res.status(400).json({ error: 'F.I.SH va login bo\'sh bo\'lmasligi kerak' });
-  }
-  if (isUsernameTaken(username, 'IT_ADMIN', targetId)) {
-    return res.status(400).json({ error: 'Ushbu login allaqachon band' });
-  }
-  if (password && password.length < 4) {
-    return res.status(400).json({ error: 'Yangi parol kamida 4 belgidan iborat bo\'lishi kerak' });
-  }
-
-  admin.name = name;
-  admin.username = username;
-  if (password) {
-    admin.passwordHash = hashPassword(password);
-  }
-  saveDatabase(db);
-  logAccess(req.authUser.id, req.authUser.name, req.authUser.role, `IT Admin yangilandi: ${name}`);
-  res.json({ status: 'ok' });
-});
-
-app.delete('/api/it-admins/:id', requireAuth, requireSuperAdmin, (req, res) => {
-  const targetId = Number(req.params.id);
-  const idx = db.itAdmins.findIndex((a) => Number(a.id) === targetId);
-  if (idx === -1) {
-    return res.status(404).json({ error: 'IT Admin topilmadi' });
-  }
-  const removed = db.itAdmins.splice(idx, 1)[0];
-  saveDatabase(db);
-  logAccess(req.authUser.id, req.authUser.name, req.authUser.role, `IT Admin o'chirildi: ${removed.name}`);
-  res.json({ status: 'ok' });
-});
-
-app.delete('/api/logs', requireAuth, requireSuperAdmin, (req, res) => {
-  db.logs = [];
-  saveDatabase(db);
-  logAccess(req.authUser.id, req.authUser.name, req.authUser.role, 'Jurnal tozalandi');
-  res.json({ status: 'ok' });
-});
-
-// ==========================================
-// DOSKA APK UCHUN API ENDPOINTLARI
-// ==========================================
-app.get('/api/status', (req, res) => {
   res.json({
     status: 'online',
-    service: 'SmartBoard 86 Locker - Web Control Platform',
+    service: 'SmartBoard 86 Locker - Render Central Server',
     time: getFormattedTime(),
+    botConnected: Boolean(bot && !is401Reported),
+    botUsername: botUsername || '',
     activeBoardsCount: connectedBoards.size,
+    onlineBoardsCount,
     roomsCount: db.rooms.length
   });
 });
@@ -773,38 +471,35 @@ app.get('/health', (req, res) => {
 app.get('/api/board/list', (req, res) => {
   const now = Date.now();
   const list = [];
-  for (const [, b] of connectedBoards.entries()) {
-    const isOnline = now - b.lastSeen < 15000;
-    list.push({ ...b, isOnline });
+  for (const [key, b] of connectedBoards.entries()) {
+    list.push({
+      key,
+      ...b,
+      isOnline: isBoardOnline(b, now)
+    });
   }
   res.json({ boards: list, rooms: db.rooms });
 });
 
+// APK har 1.5 soniyada polling yuboradi
 app.post('/api/board/poll', (req, res) => {
   const { mac, boardId, hardwareId, roomName, isLocked, secondsRemaining, teacherName, appVersion } = req.body || {};
   if (!mac && !boardId && !hardwareId) {
     return res.status(400).json({ error: 'Qurilma identifikatori talab qilinadi' });
   }
 
-  const clientMac = (mac || '').trim().toUpperCase();
-  const clientBoardId = (boardId || '').trim().toUpperCase();
-  const clientHwId = (hardwareId || '').trim().toUpperCase();
+  const clientMac = normalizeId(mac);
+  const clientBoardId = normalizeId(boardId);
+  const clientHwId = normalizeId(hardwareId);
   const clientIp = req.ip || req.headers['x-forwarded-for'] || '';
 
   const boardKey = resolveBoardKey(clientMac, clientBoardId, clientHwId, clientIp);
-
-  const existingRoom = db.rooms.find((r) => {
-    const rId = r.id.trim().toUpperCase();
-    const rIdNoColon = rId.replace(/:/g, '');
-    const macNoColon = clientMac.replace(/:/g, '');
-    return (
-      rId === boardKey ||
-      (clientMac && rId === clientMac) ||
-      (clientBoardId && rId === clientBoardId) ||
-      (clientHwId && rId === clientHwId) ||
-      (macNoColon && rIdNoColon === macNoColon) ||
-      (r.name && roomName && r.name.trim().toLowerCase() === roomName.trim().toLowerCase())
-    );
+  const existingRoom = findRoomForDevice({
+    mac: clientMac,
+    boardId: clientBoardId,
+    hardwareId: clientHwId,
+    boardKey,
+    roomName
   });
 
   const boardInfo = {
@@ -812,7 +507,7 @@ app.post('/api/board/poll', (req, res) => {
     boardId: clientBoardId || 'N/A',
     hardwareId: clientHwId || 'N/A',
     roomId: existingRoom ? existingRoom.id : boardKey,
-    roomName: existingRoom ? existingRoom.name : (roomName || 'Noma\'lum xona'),
+    roomName: existingRoom ? existingRoom.name : (roomName || 'Biriktirilmagan'),
     isLocked: !!isLocked,
     secondsRemaining: Number(secondsRemaining) || 0,
     teacherName: teacherName || '',
@@ -824,17 +519,20 @@ app.post('/api/board/poll', (req, res) => {
 
   connectedBoards.set(boardKey, boardInfo);
 
-  if (!existingRoom && !newlyDetectedHistory.has(boardKey)) {
-    newlyDetectedHistory.set(boardKey, getFormattedTime());
+  if (!existingRoom) {
+    notifyAdminsNewBoard(boardKey, clientIp, {
+      mac: clientMac,
+      boardId: clientBoardId,
+      hardwareId: clientHwId
+    });
   }
 
-  const myPossibleKeys = [boardKey];
-  if (clientMac) myPossibleKeys.push(clientMac);
-  if (clientBoardId) myPossibleKeys.push(clientBoardId);
-  if (existingRoom) myPossibleKeys.push(existingRoom.id.toUpperCase());
+  const possibleKeys = [boardKey, clientMac, clientBoardId, clientHwId, existingRoom ? normalizeId(existingRoom.id) : '']
+    .map(normalizeId)
+    .filter(Boolean);
 
   let targetCmd = null;
-  for (const k of myPossibleKeys) {
+  for (const k of possibleKeys) {
     const q = boardQueues.get(k);
     if (q && q.length > 0) {
       targetCmd = q.shift();
@@ -847,9 +545,132 @@ app.post('/api/board/poll', (req, res) => {
     status: 'ok',
     serverTime: getFormattedTime(),
     isRegistered: !!existingRoom,
+    registeredRoomId: existingRoom ? existingRoom.id : null,
     registeredRoomName: existingRoom ? existingRoom.name : null,
     command: targetCmd
   });
+});
+
+// Doska ekranidagi "Botga so'rov yuborish" tugmasi bosilganda
+app.post('/api/board/request-registration', (req, res) => {
+  const { mac, boardId, hardwareId } = req.body || {};
+  if (!mac && !boardId && !hardwareId) {
+    return res.status(400).json({ error: 'Qurilma identifikatori talab qilinadi' });
+  }
+
+  const clientMac = normalizeId(mac);
+  const clientBoardId = normalizeId(boardId);
+  const clientHwId = normalizeId(hardwareId);
+  const clientIp = req.ip || req.headers['x-forwarded-for'] || '';
+  const boardKey = resolveBoardKey(clientMac, clientBoardId, clientHwId, clientIp);
+
+  if (!connectedBoards.has(boardKey)) {
+    connectedBoards.set(boardKey, {
+      mac: clientMac || 'N/A',
+      boardId: clientBoardId || 'N/A',
+      hardwareId: clientHwId || 'N/A',
+      roomId: boardKey,
+      roomName: 'Biriktirilmagan',
+      isLocked: true,
+      secondsRemaining: 0,
+      teacherName: '',
+      appVersion: '1.0',
+      lastSeen: Date.now(),
+      ip: clientIp,
+      isRegistered: false
+    });
+  }
+
+  notifyAdminsNewBoard(
+    boardKey,
+    clientIp,
+    { mac: clientMac, boardId: clientBoardId, hardwareId: clientHwId },
+    true
+  );
+
+  res.json({ status: 'notified', boardKey });
+});
+
+// Doska ekranining o'zidan xona nomi kiritilganda serverga saqlash
+app.post('/api/board/register', (req, res) => {
+  const { mac, boardId, hardwareId, roomName } = req.body || {};
+  const cleanRoomName = String(roomName || '').trim();
+  if (cleanRoomName.length < 2) {
+    return res.status(400).json({ error: 'Xona nomi kamida 2 ta belgidan iborat bo\'lishi kerak' });
+  }
+
+  const clientMac = normalizeId(mac);
+  const clientBoardId = normalizeId(boardId);
+  const clientHwId = normalizeId(hardwareId);
+  const clientIp = req.ip || req.headers['x-forwarded-for'] || '';
+  const boardKey = resolveBoardKey(clientMac, clientBoardId, clientHwId, clientIp);
+  const targetId = isMeaningfulMac(clientMac) ? clientMac : (clientBoardId || boardKey);
+
+  upsertRoom(targetId, cleanRoomName, 'Doska ekrani', boardKey);
+  logAccess(0, 'Doska ekrani', 'SYSTEM', `Doska ekrandan ro'yxatdan o'tdi: ${cleanRoomName} (${targetId})`);
+
+  if (bot) {
+    const adminIds = new Set([SUPER_ADMIN_ID, ...db.itAdmins.map((a) => Number(a.id))]);
+    const msg =
+      `<b>[Yangi Xona] Doska ekrandan ro'yxatdan o'tkazildi</b>\n` +
+      `${DIVIDER}\n` +
+      `Xona nomi: <b>${escapeHtml(cleanRoomName)}</b>\n` +
+      `Qurilma ID: <code>${escapeHtml(targetId)}</code>\n` +
+      `Vaqt: <code>${getFormattedTime()}</code>`;
+    for (const adminId of adminIds) {
+      bot.sendMessage(adminId, msg, { parse_mode: 'HTML' }).catch(() => {});
+    }
+  }
+
+  res.json({ status: 'registered', id: targetId, roomName: cleanRoomName });
+});
+
+// 45 daqiqalik dars vaqti tugaganda doska serverga xabar beradi
+app.post('/api/board/lesson-expired', (req, res) => {
+  const { mac, boardId, hardwareId, roomName, teacherName } = req.body || {};
+  const clientMac = normalizeId(mac);
+  const clientBoardId = normalizeId(boardId);
+  const clientHwId = normalizeId(hardwareId);
+  const clientIp = req.ip || req.headers['x-forwarded-for'] || '';
+  const boardKey = resolveBoardKey(clientMac, clientBoardId, clientHwId, clientIp);
+  const existingRoom = findRoomForDevice({
+    mac: clientMac,
+    boardId: clientBoardId,
+    hardwareId: clientHwId,
+    boardKey,
+    roomName
+  });
+
+  const displayRoom = existingRoom ? existingRoom.name : (roomName || boardKey);
+  const lookupKeys = [boardKey, existingRoom ? normalizeId(existingRoom.id) : '', clientMac, clientBoardId, 'ALL']
+    .filter(Boolean);
+
+  let sessionInfo = null;
+  let matchedKey = null;
+  for (const k of lookupKeys) {
+    if (activeLessons.has(k)) {
+      sessionInfo = activeLessons.get(k);
+      matchedKey = k;
+      break;
+    }
+  }
+  if (matchedKey) activeLessons.delete(matchedKey);
+
+  const teacher = (sessionInfo && sessionInfo.teacherName) || teacherName || 'O\'qituvchi';
+  logAccess(0, teacher, 'SYSTEM', `Dars vaqti tugadi (Avtomatik qulflandi): ${displayRoom}`);
+
+  if (bot && sessionInfo && sessionInfo.chatId) {
+    const expiredText =
+      `<b>[Tugadi] Dars vaqti yakunlandi</b>\n` +
+      `${DIVIDER}\n` +
+      `Xona: <b>${escapeHtml(displayRoom)}</b>\n` +
+      `O'qituvchi: <b>${escapeHtml(teacher)}</b>\n` +
+      `Vaqt: <code>${getFormattedTime()}</code>\n\n` +
+      `Doska avtomatik ravishda qulflandi va kutish rejimiga o'tkazildi.`;
+    bot.sendMessage(sessionInfo.chatId, expiredText, { parse_mode: 'HTML' }).catch(() => {});
+  }
+
+  res.json({ status: 'ok' });
 });
 
 app.post('/api/board/ack', (req, res) => {
@@ -859,10 +680,7 @@ app.post('/api/board/ack', (req, res) => {
 
 app.post('/api/board/unlock', (req, res) => {
   const { targetRoomId, teacherName, durationMinutes } = req.body || {};
-  const target = String(targetRoomId || '').trim().toUpperCase();
-  if (!target || target === 'ALL') {
-    return res.status(400).json({ error: 'Aniq targetRoomId ko\'rsatilishi shart' });
-  }
+  const target = targetRoomId || 'ALL';
   const duration = Number(durationMinutes) || 45;
   const teacher = teacherName || 'Mas\'ul O\'qituvchi';
 
@@ -879,10 +697,7 @@ app.post('/api/board/unlock', (req, res) => {
 
 app.post('/api/board/lock', (req, res) => {
   const { targetRoomId, reason } = req.body || {};
-  const target = String(targetRoomId || '').trim().toUpperCase();
-  if (!target || target === 'ALL') {
-    return res.status(400).json({ error: 'Aniq targetRoomId ko\'rsatilishi shart' });
-  }
+  const target = targetRoomId || 'ALL';
 
   enqueueCommandForTarget(target, {
     type: 'LOCK',
@@ -894,14 +709,1311 @@ app.post('/api/board/lock', (req, res) => {
   res.json({ status: 'enqueued', targetRoomId: target });
 });
 
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+// ==========================================
+// TELEGRAM BOT SOZLAMALARI VA BOSH QARORGOH
+// ==========================================
+if (BOT_TOKEN && BOT_TOKEN.includes(':') && !BOT_TOKEN.startsWith('YOUR_')) {
+  try {
+    bot = new TelegramBot(BOT_TOKEN, { polling: true });
+    console.log('Telegram Bot muvaffaqiyatli ishga tushirildi (Polling).');
+    bot
+      .getMe()
+      .then((me) => {
+        botUsername = me && me.username ? me.username : '';
+        if (botUsername) console.log(`Bot foydalanuvchi nomi: @${botUsername}`);
+      })
+      .catch(() => {});
 
+    bot
+      .setMyCommands([
+        { command: 'start', description: 'Boshqaruv markazini ochish' },
+        { command: 'status', description: 'Doskalar ro\'yxati va holati' },
+        { command: 'unlock', description: 'Darsni boshlash (Doskani ochish)' },
+        { command: 'lock', description: 'Doskani qulflash' },
+        { command: 'extend', description: 'Dars vaqtiga +10 daqiqa qo\'shish' },
+        { command: 'rooms', description: 'Xonalar ro\'yxati (Admin)' },
+        { command: 'add_room', description: 'Yangi xona qo\'shish (Admin)' },
+        { command: 'teachers', description: 'O\'qituvchilar ro\'yxati (Admin)' },
+        { command: 'admins', description: 'IT Adminlar boshqaruvi (Super Admin)' },
+        { command: 'logs', description: 'Kirish jurnali (Admin)' },
+        { command: 'cancel', description: 'Joriy amalni bekor qilish' }
+      ])
+      .catch(() => {});
+  } catch (e) {
+    console.error('Telegram botni ishga tushirishda xatolik:', e.message);
+  }
+} else {
+  console.log('-------------------------------------------------------------');
+  console.log('TELEGRAM_BOT_TOKEN kiritilmagan.');
+  console.log('Render.com -> Environment bo\'limida Telegram bot tokeningizni kiriting.');
+  console.log('-------------------------------------------------------------');
+}
+
+if (bot) {
+  bot.on('polling_error', (error) => {
+    if (
+      error.code === 'ETELEGRAM' &&
+      (error.message.includes('401') || (error.response && error.response.statusCode === 401))
+    ) {
+      if (!is401Reported) {
+        console.error('-------------------------------------------------------------');
+        console.error('XATOLIK: Telegram Bot Token noto\'g\'ri yoki bekor qilingan (401 Unauthorized)!');
+        console.error('Render.com -> Environment bo\'limida TELEGRAM_BOT_TOKEN ga yangi tokenni kiriting.');
+        console.error('-------------------------------------------------------------');
+        is401Reported = true;
+      }
+      bot.stopPolling().catch(() => {});
+      return;
+    }
+    console.error('Telegram Polling Error:', error.code, error.message);
+  });
+
+  const MENU_BUTTONS = new Set([
+    'Darsni boshlash',
+    'Darsni boshlash (Ochish)',
+    'Doskani qulflash',
+    'Doskani qulflash (Bloklash)',
+    '+10 daqiqa qo\'shish',
+    'Doskalar holati',
+    'Doskalar ro\'yxati va holati',
+    'Xonalar ro\'yxati',
+    'Yangi xona qo\'shish',
+    'O\'qituvchilar',
+    'Kirish jurnali',
+    'IT Adminlar'
+  ]);
+
+  function buildMainKeyboard(role) {
+    const keyboard = [
+      [{ text: 'Darsni boshlash' }, { text: 'Doskani qulflash' }],
+      [{ text: '+10 daqiqa qo\'shish' }, { text: 'Doskalar holati' }]
+    ];
+
+    if (role === 'SUPER_ADMIN' || role === 'IT_ADMIN') {
+      keyboard.push([{ text: 'Xonalar ro\'yxati' }, { text: 'Yangi xona qo\'shish' }]);
+      keyboard.push([{ text: 'O\'qituvchilar' }, { text: 'Kirish jurnali' }]);
+    }
+
+    if (role === 'SUPER_ADMIN') {
+      keyboard.push([{ text: 'IT Adminlar' }]);
+    }
+
+    return {
+      keyboard,
+      resize_keyboard: true,
+      one_time_keyboard: false
+    };
+  }
+
+  function getBoardStatusTag(board, now = Date.now()) {
+    if (!isBoardOnline(board, now)) return '[Oflayn]';
+    if (board.isLocked) return '[Onlayn | Qulfda]';
+    const mins = Math.max(1, Math.ceil((Number(board.secondsRemaining) || 0) / 60));
+    return `[Onlayn | Darsda: ${mins} daq]`;
+  }
+
+  async function sendOrEdit(chatId, text, replyMarkup = null, messageId = null) {
+    const opts = { parse_mode: 'HTML' };
+    if (replyMarkup) opts.reply_markup = replyMarkup;
+
+    if (messageId) {
+      try {
+        return await bot.editMessageText(text, {
+          chat_id: chatId,
+          message_id: messageId,
+          ...opts
+        });
+      } catch (_) {}
+    }
+    return bot.sendMessage(chatId, text, opts);
+  }
+
+  async function renderBoardList(chatId, messageId = null, role = 'TEACHER') {
+    const now = Date.now();
+    const unassigned = getUnassignedBoards();
+    let listText = `<b>SmartBoard 86 — Boshqaruv Markazi</b>\n${DIVIDER}\n`;
+
+    if (db.rooms.length === 0 && unassigned.length === 0) {
+      listText +=
+        `<i>Hozircha tizimda birorta doska ro'yxatdan o'tmagan.</i>\n\n` +
+        `Yangi doskani ishga tushirganingizda, bot sizga avtomatik tarzda xona nomini kiritish tugmasini yuboradi.`;
+    } else {
+      if (db.rooms.length > 0) {
+        listText += `<b>Xonalar (${db.rooms.length} ta):</b>\n\n`;
+        db.rooms.forEach((r, idx) => {
+          const found = findConnectedBoardForRoom(r);
+          const statusTag = getBoardStatusTag(found ? found.board : null, now);
+          listText += `${idx + 1}. <b>${escapeHtml(r.name)}</b> — ${statusTag}\n`;
+        });
+      }
+      if (unassigned.length > 0) {
+        listText += `\n<b>Biriktirilmagan yangi doskalar (${unassigned.length} ta):</b>\n`;
+        unassigned.forEach(({ key, board }, idx) => {
+          const stateStr = isBoardOnline(board, now) ? '[Onlayn]' : '[Oflayn]';
+          listText += `${idx + 1}. <code>${escapeHtml(key)}</code> — ${stateStr}\n`;
+        });
+      }
+      listText += `\nKerakli doskani tanlang:`;
+    }
+
+    const inline_keyboard = [];
+    if (db.rooms.length > 1 || connectedBoards.size > 1) {
+      inline_keyboard.push([{ text: 'Barcha doskalar (HAMMASI)', callback_data: 'select_board:ALL' }]);
+    }
+
+    for (const room of db.rooms) {
+      const found = findConnectedBoardForRoom(room);
+      const statusTag = getBoardStatusTag(found ? found.board : null, now);
+      inline_keyboard.push([
+        {
+          text: `${room.name} ${statusTag}`,
+          callback_data: `select_board:${room.id}`
+        }
+      ]);
+    }
+
+    if (role === 'SUPER_ADMIN' || role === 'IT_ADMIN') {
+      for (const { key } of unassigned) {
+        inline_keyboard.push([
+          { text: `Yangi doska: ${key} [Nom berish]`, callback_data: `cmd_setup_board:${key}` }
+        ]);
+      }
+    }
+
+    inline_keyboard.push([{ text: 'Ro\'yxatni yangilash', callback_data: 'show_board_list' }]);
+    return sendOrEdit(chatId, listText, { inline_keyboard }, messageId);
+  }
+
+  async function renderBoardDetails(chatId, targetRoomId, messageId = null) {
+    const now = Date.now();
+    const isAll = targetRoomId === 'ALL';
+
+    if (isAll) {
+      let onlineCount = 0;
+      for (const b of connectedBoards.values()) {
+        if (isBoardOnline(b, now)) onlineCount++;
+      }
+      const text =
+        `<b>Barcha Interaktiv Doskalar Boshqaruvi</b>\n` +
+        `${DIVIDER}\n` +
+        `Ro'yxatdagi xonalar: <b>${db.rooms.length} ta</b>\n` +
+        `Onlayn doskalar: <b>${onlineCount} / ${connectedBoards.size} ta</b>\n\n` +
+        `Amalni tanlang:`;
+
+      const inline_keyboard = [
+        [
+          { text: 'Barchasini ochish (45 min)', callback_data: 'action_unlock:ALL' },
+          { text: 'Barchasini qulflash', callback_data: 'action_lock:ALL' }
+        ],
+        [{ text: 'Barchasiga +10 daqiqa', callback_data: 'action_extend:ALL' }],
+        [{ text: 'Doskalar ro\'yxatiga qaytish', callback_data: 'show_board_list' }]
+      ];
+      return sendOrEdit(chatId, text, { inline_keyboard }, messageId);
+    }
+
+    const room = db.rooms.find((r) => normalizeId(r.id) === normalizeId(targetRoomId));
+    const found = room
+      ? findConnectedBoardForRoom(room)
+      : connectedBoards.has(normalizeId(targetRoomId))
+        ? { key: normalizeId(targetRoomId), board: connectedBoards.get(normalizeId(targetRoomId)) }
+        : null;
+    const b = found ? found.board : null;
+    const online = isBoardOnline(b, now);
+
+    const roomTitle = room ? room.name : (b && b.roomName !== 'Biriktirilmagan' ? b.roomName : targetRoomId);
+    const statusStr = online
+      ? b.isLocked
+        ? '[Qulfda] Kutish rejimida'
+        : `[Darsda] ${Math.max(1, Math.ceil((Number(b.secondsRemaining) || 0) / 60))} daqiqa qoldi\nO'qituvchi: <b>${escapeHtml(b.teacherName || 'Noma\'lum')}</b>`
+      : '[Oflayn] Tarmoqqa ulanmagan';
+
+    const text =
+      `<b>Doska: ${escapeHtml(roomTitle)}</b>\n` +
+      `${DIVIDER}\n` +
+      `Qurilma ID: <code>${escapeHtml(targetRoomId)}</code>\n` +
+      `Aloqa holati: <b>${online ? 'Onlayn (Faol)' : 'Oflayn'}</b>\n` +
+      `Ekran holati: <b>${statusStr}</b>\n` +
+      (b && b.ip ? `IP manzil: <code>${escapeHtml(b.ip)}</code>\n` : '') +
+      `\nAmalni tanlang:`;
+
+    const inline_keyboard = [
+      [
+        { text: 'Darsni boshlash (45 min)', callback_data: `action_unlock:${targetRoomId}` },
+        { text: 'Doskani qulflash', callback_data: `action_lock:${targetRoomId}` }
+      ],
+      [{ text: '+10 daqiqa qo\'shish', callback_data: `action_extend:${targetRoomId}` }],
+      [{ text: 'Doskalar ro\'yxatiga qaytish', callback_data: 'show_board_list' }]
+    ];
+    return sendOrEdit(chatId, text, { inline_keyboard }, messageId);
+  }
+
+  function buildRoomSelectionKeyboard(actionPrefix, includeAll = false) {
+    const inline_keyboard = [];
+    const now = Date.now();
+
+    if (includeAll && (db.rooms.length > 1 || connectedBoards.size > 1)) {
+      inline_keyboard.push([{ text: 'Barcha doskalar (HAMMASI)', callback_data: `${actionPrefix}:ALL` }]);
+    }
+
+    const renderedIds = new Set();
+    for (const room of db.rooms) {
+      const rId = normalizeId(room.id);
+      renderedIds.add(rId);
+      const found = findConnectedBoardForRoom(room);
+      if (found) renderedIds.add(normalizeId(found.key));
+      const statusTag = getBoardStatusTag(found ? found.board : null, now);
+      inline_keyboard.push([
+        { text: `${room.name} ${statusTag}`, callback_data: `${actionPrefix}:${room.id}` }
+      ]);
+    }
+
+    for (const [key, b] of connectedBoards.entries()) {
+      const upperKey = normalizeId(key);
+      if (!renderedIds.has(upperKey)) {
+        renderedIds.add(upperKey);
+        const statusTag = getBoardStatusTag(b, now);
+        inline_keyboard.push([
+          { text: `${b.roomName !== 'Biriktirilmagan' ? b.roomName : key} ${statusTag}`, callback_data: `${actionPrefix}:${key}` }
+        ]);
+      }
+    }
+
+    inline_keyboard.push([{ text: 'Doskalar ro\'yxatiga qaytish', callback_data: 'show_board_list' }]);
+    return { inline_keyboard };
+  }
+
+  async function renderRoomsManagement(chatId, messageId = null) {
+    const now = Date.now();
+    let msgText = `<b>Ro'yxatdagi xonalar (${db.rooms.length} ta)</b>\n${DIVIDER}\n\n`;
+    const inline_keyboard = [];
+
+    if (db.rooms.length === 0) {
+      msgText += `<i>Hozircha birorta xona saqlanmagan.</i>\n\n`;
+    } else {
+      db.rooms.forEach((r, idx) => {
+        const found = findConnectedBoardForRoom(r);
+        const statusTag = getBoardStatusTag(found ? found.board : null, now);
+        msgText +=
+          `${idx + 1}. <b>${escapeHtml(r.name)}</b> ${statusTag}\n` +
+          `   ID: <code>${escapeHtml(r.id)}</code>\n` +
+          `   Qo'shgan: ${escapeHtml(r.addedBy || 'Admin')} (${escapeHtml(r.addedAt || '-')})\n\n`;
+        inline_keyboard.push([
+          { text: `Boshqarish: ${r.name}`, callback_data: `select_board:${r.id}` },
+          { text: `O'chirish`, callback_data: `del_room:${r.id}` }
+        ]);
+      });
+    }
+
+    msgText += `Qo'lda qo'shish formati:\n<code>/add_room &lt;ID&gt; &lt;Xona nomi&gt;</code>`;
+    inline_keyboard.push([{ text: '+ Yangi xona qo\'shish', callback_data: 'start_manual_room_add' }]);
+    inline_keyboard.push([{ text: 'Doskalar ro\'yxatiga qaytish', callback_data: 'show_board_list' }]);
+
+    return sendOrEdit(chatId, msgText, { inline_keyboard }, messageId);
+  }
+
+  async function renderTeachersManagement(chatId, messageId = null) {
+    let msgText = `<b>Ruxsat etilgan o'qituvchilar (${db.teachers.length} ta)</b>\n${DIVIDER}\n\n`;
+    const inline_keyboard = [];
+
+    if (db.teachers.length === 0) {
+      msgText += `<i>Hozircha o'qituvchilar qo'shilmagan.</i>\n\n`;
+    } else {
+      db.teachers.forEach((t, idx) => {
+        msgText +=
+          `${idx + 1}. <b>${escapeHtml(t.name)}</b>\n` +
+          `   Telegram ID: <code>${t.id}</code>\n\n`;
+        inline_keyboard.push([
+          { text: `O'chirish: ${t.name} (${t.id})`, callback_data: `del_teacher:${t.id}` }
+        ]);
+      });
+    }
+
+    msgText += `Buyruq orqali qo'shish:\n<code>/add_teacher &lt;Telegram_ID&gt; &lt;F.I.SH&gt;</code>`;
+    inline_keyboard.push([{ text: '+ Yangi o\'qituvchi qo\'shish', callback_data: 'start_add_teacher' }]);
+    inline_keyboard.push([{ text: 'Doskalar ro\'yxatiga qaytish', callback_data: 'show_board_list' }]);
+
+    return sendOrEdit(chatId, msgText, { inline_keyboard }, messageId);
+  }
+
+  async function renderAdminsManagement(chatId, messageId = null) {
+    let msgText =
+      `<b>Tizim Administratorlari</b>\n${DIVIDER}\n\n` +
+      `<b>Bosh Super Admin:</b> <code>${SUPER_ADMIN_ID}</code>\n\n` +
+      `<b>Tayinlangan IT Adminlar (${db.itAdmins.length} ta):</b>\n\n`;
+    const inline_keyboard = [];
+
+    if (db.itAdmins.length === 0) {
+      msgText += `<i>Qo'shimcha IT Adminlar yo'q.</i>\n\n`;
+    } else {
+      db.itAdmins.forEach((a, idx) => {
+        msgText +=
+          `${idx + 1}. <b>${escapeHtml(a.name)}</b>\n` +
+          `   Telegram ID: <code>${a.id}</code>\n` +
+          `   Tayinlangan: <code>${escapeHtml(a.addedAt || '-')}</code>\n\n`;
+        inline_keyboard.push([
+          { text: `O'chirish: ${a.name} (${a.id})`, callback_data: `del_admin:${a.id}` }
+        ]);
+      });
+    }
+
+    msgText += `Buyruq orqali qo'shish:\n<code>/add_admin &lt;Telegram_ID&gt; &lt;Ism&gt;</code>`;
+    inline_keyboard.push([{ text: '+ Yangi IT Admin qo\'shish', callback_data: 'start_add_admin' }]);
+    inline_keyboard.push([{ text: 'Doskalar ro\'yxatiga qaytish', callback_data: 'show_board_list' }]);
+
+    return sendOrEdit(chatId, msgText, { inline_keyboard }, messageId);
+  }
+
+  async function saveRoomAndNotify(chatId, userId, displayName, role, targetId, roomName) {
+    upsertRoom(targetId, roomName, displayName);
+    logAccess(userId, displayName, role, `Yangi xona saqlandi: ${roomName} (${targetId})`);
+
+    await bot.sendMessage(
+      chatId,
+      `<b>Yangi xona muvaffaqiyatli saqlandi</b>\n` +
+        `${DIVIDER}\n` +
+        `Xona nomi: <b>${escapeHtml(roomName)}</b>\n` +
+        `Qurilma ID: <code>${escapeHtml(targetId)}</code>\n` +
+        `Mas'ul: <b>${escapeHtml(displayName)}</b>\n` +
+        `Vaqt: <code>${getFormattedTime()}</code>\n\n` +
+        `<i>Doska tizimga muvaffaqiyatli biriktirildi.</i>`,
+      { parse_mode: 'HTML', reply_markup: buildMainKeyboard(role) }
+    );
+
+    return renderBoardList(chatId, null, role);
+  }
+
+  // ==========================================
+  // XABARLAR TINGLOVCHISI
+  // ==========================================
+  bot.on('message', async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const text = (msg.text || '').trim();
+    if (!text) return;
+
+    const userName =
+      [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ') ||
+      (msg.from.username ? `@${msg.from.username}` : `Foydalanuvchi (${userId})`);
+
+    const { isAuthorized, role, name: customName } = checkUserRole(userId);
+    const displayName = customName || userName;
+
+    if (!isAuthorized) {
+      return bot.sendMessage(
+        chatId,
+        `Sizda ushbu tizimdan foydalanish ruxsati yo'q.\n\n` +
+          `Sizning Telegram ID: <code>${userId}</code>\n\n` +
+          `Ruxsat olish uchun maktab IT administratoriga murojaat qiling.`,
+        { parse_mode: 'HTML' }
+      );
+    }
+
+    const isCancel = text === '/cancel' || text.toLowerCase() === 'bekor qilish';
+    const isMenuOrSlash = text.startsWith('/') || MENU_BUTTONS.has(text);
+
+    if (isCancel) {
+      if (chatStates.has(chatId)) {
+        chatStates.delete(chatId);
+        return bot.sendMessage(chatId, 'Joriy amal bekor qilindi.', {
+          reply_markup: buildMainKeyboard(role)
+        });
+      }
+      return bot.sendMessage(chatId, 'Boshqaruv paneli faol.', {
+        reply_markup: buildMainKeyboard(role)
+      });
+    }
+
+    // Agar foydalanuvchi menyu tugmasini yoki /buyruqni bossa, eski kiritish holati tozalanadi
+    if (isMenuOrSlash && chatStates.has(chatId)) {
+      chatStates.delete(chatId);
+    }
+
+    // ------------------------------------------
+    // KO'P BOSQICHLI KIRITISH HOLATI (STATE MACHINE)
+    // ------------------------------------------
+    if (chatStates.has(chatId) && !isMenuOrSlash) {
+      const state = chatStates.get(chatId);
+
+      // 1-bosqich: Qurilma ID (MAC) qabul qilish -> 2-bosqichga o'tish
+      if (state.step === 'AWAITING_MANUAL_MAC') {
+        if (role !== 'SUPER_ADMIN' && role !== 'IT_ADMIN') {
+          chatStates.delete(chatId);
+          return bot.sendMessage(chatId, 'Bu amal faqat Adminlar uchun.');
+        }
+        const candidateId = normalizeId(text);
+        if (!isValidDeviceIdInput(candidateId)) {
+          return bot.sendMessage(
+            chatId,
+            `Qurilma ID formati noto'g'ri.\n\n` +
+              `Faqat harflar, raqamlar, <code>:</code>, <code>-</code> va <code>_</code> ishlatilishi mumkin.\n` +
+              `Misol: <code>AA:BB:CC:DD:EE:FF</code> yoki <code>BOARD_123ABC</code>\n\n` +
+              `Qaytadan kiriting yoki <code>/cancel</code> yuboring:`,
+            { parse_mode: 'HTML' }
+          );
+        }
+
+        chatStates.set(chatId, {
+          step: 'AWAITING_ROOM_NAME',
+          payload: { targetId: candidateId },
+          updatedAt: Date.now()
+        });
+
+        return bot.sendMessage(
+          chatId,
+          `<b>2-qadam: Xona nomini kiriting</b>\n` +
+            `${DIVIDER}\n` +
+            `Qurilma ID qabul qilindi: <code>${escapeHtml(candidateId)}</code>\n\n` +
+            `Endi ushbu doska o'rnatilgan <b>xona nomini</b> yozib yuboring:\n` +
+            `<i>(Masalan: 101-Fizika xonasi)</i>`,
+          {
+            parse_mode: 'HTML',
+            reply_markup: {
+              inline_keyboard: [[{ text: 'Bekor qilish', callback_data: 'cmd_cancel' }]]
+            }
+          }
+        );
+      }
+
+      // 2-bosqich: Xona nomini qabul qilish -> Bazaga saqlash
+      if (state.step === 'AWAITING_ROOM_NAME') {
+        if (role !== 'SUPER_ADMIN' && role !== 'IT_ADMIN') {
+          chatStates.delete(chatId);
+          return bot.sendMessage(chatId, 'Bu amal faqat Adminlar uchun.');
+        }
+        const targetId = state.payload.targetId;
+        const roomName = text.trim();
+
+        if (roomName.length < 2) {
+          return bot.sendMessage(
+            chatId,
+            `Xona nomi juda qisqa. Iltimos, to'liqroq yozing (masalan: <code>101-Fizika</code>) yoki <code>/cancel</code> bosing:`,
+            { parse_mode: 'HTML' }
+          );
+        }
+
+        if (looksLikeMacOrDeviceId(roomName)) {
+          return bot.sendMessage(
+            chatId,
+            `Siz xona nomi o'rniga Qurilma ID (<code>${escapeHtml(roomName)}</code>) kiritdingiz.\n\n` +
+              `Iltimos, hozir <code>${escapeHtml(targetId)}</code> uchun <b>xona nomini</b> yozib yuboring (masalan: <b>101-Fizika</b>):`,
+            { parse_mode: 'HTML' }
+          );
+        }
+
+        chatStates.delete(chatId);
+        return saveRoomAndNotify(chatId, userId, displayName, role, targetId, roomName);
+      }
+
+      // O'qituvchi qo'shish (interaktiv)
+      if (state.step === 'AWAITING_TEACHER_INPUT') {
+        if (role !== 'SUPER_ADMIN' && role !== 'IT_ADMIN') {
+          chatStates.delete(chatId);
+          return bot.sendMessage(chatId, 'Bu amal faqat Adminlar uchun.');
+        }
+        const parts = text.split(/\s+/);
+        const targetId = parseInt(parts[0], 10);
+        const teacherName = parts.slice(1).join(' ').trim();
+        if (!targetId || targetId <= 0 || !teacherName) {
+          return bot.sendMessage(
+            chatId,
+            `Format noto'g'ri. Quyidagicha yuboring:\n<code>123456789 Ali Valiyev</code>\n\nYoki bekor qilish: <code>/cancel</code>`,
+            { parse_mode: 'HTML' }
+          );
+        }
+
+        chatStates.delete(chatId);
+        const existing = db.teachers.find((t) => Number(t.id) === targetId);
+        if (existing) {
+          existing.name = teacherName;
+        } else {
+          db.teachers.push({ id: targetId, name: teacherName, addedAt: getFormattedTime() });
+        }
+        saveDatabase(db);
+        logAccess(userId, displayName, role, `O'qituvchi qo'shildi: ${teacherName} (${targetId})`);
+
+        await bot.sendMessage(
+          chatId,
+          `<b>O'qituvchi muvaffaqiyatli saqlandi</b>\n${DIVIDER}\nIsm: <b>${escapeHtml(teacherName)}</b>\nTelegram ID: <code>${targetId}</code>`,
+          { parse_mode: 'HTML', reply_markup: buildMainKeyboard(role) }
+        );
+        return renderTeachersManagement(chatId);
+      }
+
+      // IT Admin qo'shish (interaktiv)
+      if (state.step === 'AWAITING_ADMIN_INPUT') {
+        if (role !== 'SUPER_ADMIN') {
+          chatStates.delete(chatId);
+          return bot.sendMessage(chatId, 'Bu amal faqat Bosh Super Admin uchun.');
+        }
+        const parts = text.split(/\s+/);
+        const targetId = parseInt(parts[0], 10);
+        const adminName = parts.slice(1).join(' ').trim();
+        if (!targetId || targetId <= 0 || !adminName) {
+          return bot.sendMessage(
+            chatId,
+            `Format noto'g'ri. Quyidagicha yuboring:\n<code>8223415949 Husniddin</code>\n\nYoki bekor qilish: <code>/cancel</code>`,
+            { parse_mode: 'HTML' }
+          );
+        }
+
+        chatStates.delete(chatId);
+        const existing = db.itAdmins.find((a) => Number(a.id) === targetId);
+        if (existing) {
+          existing.name = adminName;
+        } else {
+          db.itAdmins.push({ id: targetId, name: adminName, addedAt: getFormattedTime() });
+        }
+        saveDatabase(db);
+        logAccess(userId, displayName, role, `IT Admin tayinlandi: ${adminName} (${targetId})`);
+
+        await bot.sendMessage(
+          chatId,
+          `<b>IT Admin muvaffaqiyatli tayinlandi</b>\n${DIVIDER}\nIsm: <b>${escapeHtml(adminName)}</b>\nTelegram ID: <code>${targetId}</code>`,
+          { parse_mode: 'HTML', reply_markup: buildMainKeyboard(role) }
+        );
+        return renderAdminsManagement(chatId);
+      }
+    }
+
+    // ------------------------------------------
+    // ASOSIY BUYRUQLAR VA TUGMALAR
+    // ------------------------------------------
+
+    // 1. /start yoki /help
+    if (text === '/start' || text === '/help') {
+      const now = Date.now();
+      let onlineCount = 0;
+      for (const b of connectedBoards.values()) {
+        if (isBoardOnline(b, now)) onlineCount++;
+      }
+
+      const msgText =
+        `<b>SmartBoard 86 — Boshqaruv Markazi</b>\n` +
+        `${DIVIDER}\n` +
+        `Foydalanuvchi: <b>${escapeHtml(displayName)}</b>\n` +
+        `Maqomingiz: <b>${getRoleLabel(role)}</b>\n` +
+        `Onlayn doskalar: <b>${onlineCount} / ${connectedBoards.size} ta</b>\n` +
+        `Ro'yxatdagi xonalar: <b>${db.rooms.length} ta</b>\n` +
+        `Server holati: <b>Render Server Faol</b>`;
+
+      await bot.sendMessage(chatId, msgText, {
+        parse_mode: 'HTML',
+        reply_markup: buildMainKeyboard(role)
+      });
+
+      return renderBoardList(chatId, null, role);
+    }
+
+    // 2. Darsni boshlash (Ochish)
+    if (
+      text === 'Darsni boshlash' ||
+      text === 'Darsni boshlash (Ochish)' ||
+      text.toLowerCase().includes('darsni boshlash') ||
+      text.toLowerCase().includes('dars boshlash') ||
+      text.startsWith('/unlock') ||
+      text.toLowerCase() === 'ochish'
+    ) {
+      const explicitArg = text.startsWith('/unlock') ? text.replace('/unlock', '').trim() : '';
+      if (explicitArg) {
+        const matched = db.rooms.find(
+          (r) =>
+            normalizeId(r.id) === normalizeId(explicitArg) ||
+            r.name.toLowerCase().includes(explicitArg.toLowerCase())
+        );
+        if (matched) {
+          enqueueCommandForTarget(matched.id, {
+            type: 'UNLOCK',
+            teacherName: displayName,
+            durationMinutes: 45,
+            targetRoomId: matched.id
+          });
+          trackActiveLesson(matched.id, chatId, displayName, matched.name);
+          logAccess(userId, displayName, role, `Dars boshlandi: ${matched.name} (45 daqiqa)`);
+          return bot.sendMessage(
+            chatId,
+            `<b>Interaktiv Doska ochildi</b>\n${DIVIDER}\nXona: <b>${escapeHtml(matched.name)}</b>\nO'qituvchi: <b>${escapeHtml(displayName)}</b>\nDars vaqti: <b>45 daqiqa</b>\nVaqt: <code>${getFormattedTime()}</code>`,
+            {
+              parse_mode: 'HTML',
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    { text: 'Doskani qulflash', callback_data: `action_lock:${matched.id}` },
+                    { text: '+10 daqiqa', callback_data: `action_extend:${matched.id}` }
+                  ],
+                  [{ text: 'Doskalar ro\'yxatiga qaytish', callback_data: 'show_board_list' }]
+                ]
+              }
+            }
+          );
+        }
+      }
+
+      if (db.rooms.length === 0 && connectedBoards.size === 0) {
+        return bot.sendMessage(
+          chatId,
+          `<b>Hozircha ulangan doska mavjud emas</b>\n${DIVIDER}\n` +
+            `Serverga hali birorta SmartBoard ilovasi ulanmagan yoki xona biriktirilmagan.\n` +
+            `Doskani yoqib internetga ulang va qayta urinib ko'ring.`,
+          { parse_mode: 'HTML' }
+        );
+      }
+
+      if (db.rooms.length === 1 && connectedBoards.size <= 1) {
+        const singleRoom = db.rooms[0];
+        enqueueCommandForTarget(singleRoom.id, {
+          type: 'UNLOCK',
+          teacherName: displayName,
+          durationMinutes: 45,
+          targetRoomId: singleRoom.id
+        });
+        trackActiveLesson(singleRoom.id, chatId, displayName, singleRoom.name);
+        logAccess(userId, displayName, role, `Dars boshlandi: ${singleRoom.name} (45 daqiqa)`);
+        return bot.sendMessage(
+          chatId,
+          `<b>Interaktiv Doska ochildi</b>\n${DIVIDER}\n` +
+            `Xona: <b>${escapeHtml(singleRoom.name)}</b>\n` +
+            `O'qituvchi: <b>${escapeHtml(displayName)}</b>\n` +
+            `Dars vaqti: <b>45 daqiqa</b>\n` +
+            `Vaqt: <code>${getFormattedTime()}</code>`,
+          {
+            parse_mode: 'HTML',
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: 'Doskani qulflash', callback_data: `action_lock:${singleRoom.id}` },
+                  { text: '+10 daqiqa', callback_data: `action_extend:${singleRoom.id}` }
+                ],
+                [{ text: 'Doskalar ro\'yxatiga qaytish', callback_data: 'show_board_list' }]
+              ]
+            }
+          }
+        );
+      }
+
+      return bot.sendMessage(
+        chatId,
+        `<b>Qaysi xonadagi doskani ochmoqchisiz?</b>\n\nIltimos, dars o'tadigan xonangizni tanlang:`,
+        {
+          parse_mode: 'HTML',
+          reply_markup: buildRoomSelectionKeyboard('unlock_room', false)
+        }
+      );
+    }
+
+    // 3. Doskani qulflash
+    if (
+      text === 'Doskani qulflash' ||
+      text === 'Doskani qulflash (Bloklash)' ||
+      text.toLowerCase().includes('qulflash') ||
+      text.startsWith('/lock') ||
+      text.toLowerCase() === 'qulf'
+    ) {
+      if (db.rooms.length === 0 && connectedBoards.size === 0) {
+        return bot.sendMessage(chatId, 'Hozircha serverga ulangan doska mavjud emas.');
+      }
+
+      if (db.rooms.length === 1 && connectedBoards.size <= 1) {
+        const singleRoom = db.rooms[0];
+        enqueueCommandForTarget(singleRoom.id, { type: 'LOCK', targetRoomId: singleRoom.id });
+        logAccess(userId, displayName, role, `Doska qulflandi: ${singleRoom.name}`);
+        return bot.sendMessage(
+          chatId,
+          `<b>Doska qulflandi</b>\n${DIVIDER}\nXona: <b>${escapeHtml(singleRoom.name)}</b>\nMas'ul: <b>${escapeHtml(displayName)}</b>\nVaqt: <code>${getFormattedTime()}</code>`,
+          {
+            parse_mode: 'HTML',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: 'Darsni boshlash (45 min)', callback_data: `action_unlock:${singleRoom.id}` }],
+                [{ text: 'Doskalar ro\'yxatiga qaytish', callback_data: 'show_board_list' }]
+              ]
+            }
+          }
+        );
+      }
+
+      return bot.sendMessage(
+        chatId,
+        `<b>Qaysi xonadagi doskani qulflamoqchisiz?</b>`,
+        {
+          parse_mode: 'HTML',
+          reply_markup: buildRoomSelectionKeyboard('lock_room', true)
+        }
+      );
+    }
+
+    // 4. +10 daqiqa qo'shish
+    if (text === '+10 daqiqa qo\'shish' || text === '/extend' || text.includes('10 daqiqa')) {
+      if (db.rooms.length === 0 && connectedBoards.size === 0) {
+        return bot.sendMessage(chatId, 'Hozircha serverga ulangan doska mavjud emas.');
+      }
+
+      if (db.rooms.length === 1 && connectedBoards.size <= 1) {
+        const singleRoom = db.rooms[0];
+        enqueueCommandForTarget(singleRoom.id, { type: 'EXTEND', minutes: 10, targetRoomId: singleRoom.id });
+        logAccess(userId, displayName, role, `+10 daqiqa qo'shildi: ${singleRoom.name}`);
+        return bot.sendMessage(
+          chatId,
+          `<b>Dars vaqti 10 daqiqaga uzaytirildi</b>\n${DIVIDER}\nXona: <b>${escapeHtml(singleRoom.name)}</b>\nVaqt: <code>${getFormattedTime()}</code>`,
+          { parse_mode: 'HTML' }
+        );
+      }
+
+      return bot.sendMessage(
+        chatId,
+        `<b>Qaysi xonadagi darsga +10 daqiqa qo'shmoqchisiz?</b>`,
+        {
+          parse_mode: 'HTML',
+          reply_markup: buildRoomSelectionKeyboard('action_extend', true)
+        }
+      );
+    }
+
+    // 5. Doskalar holati
+    if (text === 'Doskalar holati' || text === 'Doskalar ro\'yxati va holati' || text === '/status') {
+      return renderBoardList(chatId, null, role);
+    }
+
+    // 6. Xonalar ro'yxati
+    if (text === 'Xonalar ro\'yxati' || text === '/rooms') {
+      if (role !== 'SUPER_ADMIN' && role !== 'IT_ADMIN') {
+        return bot.sendMessage(chatId, 'Bu amal faqat Super Admin va IT Adminlar uchun.');
+      }
+      return renderRoomsManagement(chatId);
+    }
+
+    // 7. Yangi xona qo'shish tugmasi
+    if (text === 'Yangi xona qo\'shish') {
+      if (role !== 'SUPER_ADMIN' && role !== 'IT_ADMIN') {
+        return bot.sendMessage(chatId, 'Bu amal faqat Super Admin va IT Adminlar uchun.');
+      }
+
+      const unassigned = getUnassignedBoards();
+      const inline_keyboard = unassigned.map(({ key }) => [
+        { text: `${key} ga xona nomi berish`, callback_data: `cmd_setup_board:${key}` }
+      ]);
+      inline_keyboard.push([{ text: 'Qo\'lda ID / MAC kiritish', callback_data: 'start_manual_room_add' }]);
+      inline_keyboard.push([{ text: 'Doskalar ro\'yxatiga qaytish', callback_data: 'show_board_list' }]);
+
+      const body =
+        unassigned.length > 0
+          ? `<b>Aniqlangan yangi doskalar (${unassigned.length} ta)</b>\n${DIVIDER}\nQuyidagi doskalar tarmoqqa ulangan, ammo xona biriktirilmagan. Tanlang yoki qo'lda kiriting:`
+          : `<b>Yangi xona (doska) qo'shish</b>\n${DIVIDER}\n` +
+            `1. Yangi doskada SmartBoard ilovasini ishga tushiring — bot avtomatik xabar yuboradi.\n` +
+            `2. Yoki quyidagi <b>"Qo'lda ID / MAC kiritish"</b> tugmasini bosib doskani 2 qadamda qo'shing.\n\n` +
+            `<i>Tezkor buyruq formati:</i>\n<code>/add_room &lt;MAC_MANZIL&gt; &lt;XONA_NOMI&gt;</code>`;
+
+      return bot.sendMessage(chatId, body, {
+        parse_mode: 'HTML',
+        reply_markup: { inline_keyboard }
+      });
+    }
+
+    // 7.1 Qo'lda buyruq orqali xona qo'shish
+    if (text.startsWith('/add_room')) {
+      if (role !== 'SUPER_ADMIN' && role !== 'IT_ADMIN') {
+        return bot.sendMessage(chatId, 'Bu amal faqat Super Admin va IT Adminlar uchun.');
+      }
+      const rawArgs = text.replace('/add_room', '').trim();
+      if (!rawArgs) {
+        chatStates.set(chatId, {
+          step: 'AWAITING_MANUAL_MAC',
+          payload: {},
+          updatedAt: Date.now()
+        });
+        return bot.sendMessage(
+          chatId,
+          `<b>1-qadam: Qurilma ID (MAC) manzilini kiriting</b>\n${DIVIDER}\n` +
+            `Doska ekranidagi Qurilma ID yoki MAC manzilni yozib yuboring:\n` +
+            `<i>(Masalan: 00:1A:2B:3C:4D:5E yoki BOARD_A1B2C3)</i>\n\n` +
+            `Bekor qilish: <code>/cancel</code>`,
+          { parse_mode: 'HTML' }
+        );
+      }
+
+      const parts = rawArgs.split(/\s+/);
+      const roomId = normalizeId(parts[0]);
+      const roomName = parts.slice(1).join(' ').trim();
+
+      if (!roomId || !isValidDeviceIdInput(roomId)) {
+        return bot.sendMessage(
+          chatId,
+          `<b>Xona qo'shish formati:</b>\n\n<code>/add_room &lt;QURILMA_MAC_ID&gt; &lt;XONA_NOMI&gt;</code>\n\nMisol:\n<code>/add_room 00:1A:2B:3C:4D:5E 101-Fizika xonasi</code>`,
+          { parse_mode: 'HTML' }
+        );
+      }
+
+      if (!roomName) {
+        chatStates.set(chatId, {
+          step: 'AWAITING_ROOM_NAME',
+          payload: { targetId: roomId },
+          updatedAt: Date.now()
+        });
+        return bot.sendMessage(
+          chatId,
+          `<b>2-qadam: Xona nomini kiriting</b>\n${DIVIDER}\nQurilma ID: <code>${escapeHtml(roomId)}</code>\n\nEndi xona nomini yozib yuboring (masalan: <b>101-Fizika</b>):`,
+          { parse_mode: 'HTML' }
+        );
+      }
+
+      return saveRoomAndNotify(chatId, userId, displayName, role, roomId, roomName);
+    }
+
+    // 8. Xonani o'chirish
+    if (text.startsWith('/del_room')) {
+      if (role !== 'SUPER_ADMIN' && role !== 'IT_ADMIN') {
+        return bot.sendMessage(chatId, 'Bu amal faqat Super Admin va IT Adminlar uchun.');
+      }
+      const targetId = normalizeId(text.replace('/del_room', ''));
+      if (!targetId) {
+        return bot.sendMessage(chatId, 'Format: <code>/del_room &lt;QURILMA_ID&gt;</code>', { parse_mode: 'HTML' });
+      }
+      const index = db.rooms.findIndex((r) => normalizeId(r.id) === targetId);
+      if (index !== -1) {
+        const removed = db.rooms.splice(index, 1)[0];
+        saveDatabase(db);
+        enqueueCommandForTarget(removed.id, { type: 'UNREGISTER', targetRoomId: removed.id });
+        logAccess(userId, displayName, role, `Xona o'chirildi: ${removed.name} (${removed.id})`);
+        return bot.sendMessage(
+          chatId,
+          `Xona (<b>${escapeHtml(removed.name)}</b> — <code>${escapeHtml(removed.id)}</code>) ro'yxatdan o'chirildi.`,
+          { parse_mode: 'HTML' }
+        );
+      }
+      return bot.sendMessage(chatId, `Xona topilmadi: <code>${escapeHtml(targetId)}</code>`, { parse_mode: 'HTML' });
+    }
+
+    // 9. O'qituvchilar ro'yxati
+    if (text === 'O\'qituvchilar' || text === '/teachers') {
+      if (role !== 'SUPER_ADMIN' && role !== 'IT_ADMIN') {
+        return bot.sendMessage(chatId, 'Bu amal faqat Super Admin va IT Adminlar uchun.');
+      }
+      return renderTeachersManagement(chatId);
+    }
+
+    // 10. O'qituvchi qo'shish
+    if (text.startsWith('/add_teacher')) {
+      if (role !== 'SUPER_ADMIN' && role !== 'IT_ADMIN') {
+        return bot.sendMessage(chatId, 'Bu amal faqat Super Admin va IT Adminlar uchun.');
+      }
+      const parts = text.replace('/add_teacher', '').trim().split(/\s+/);
+      const targetId = parseInt(parts[0], 10);
+      const teacherName = parts.slice(1).join(' ').trim();
+
+      if (!targetId || targetId <= 0 || !teacherName) {
+        return bot.sendMessage(
+          chatId,
+          `Format: <code>/add_teacher &lt;Telegram_ID&gt; &lt;F.I.SH&gt;</code>\nMisol:\n<code>/add_teacher 12345678 Ali Valiyev</code>`,
+          { parse_mode: 'HTML' }
+        );
+      }
+
+      const existing = db.teachers.find((t) => Number(t.id) === targetId);
+      if (existing) {
+        existing.name = teacherName;
+      } else {
+        db.teachers.push({ id: targetId, name: teacherName, addedAt: getFormattedTime() });
+      }
+      saveDatabase(db);
+      logAccess(userId, displayName, role, `O'qituvchi qo'shildi: ${teacherName} (${targetId})`);
+      return bot.sendMessage(
+        chatId,
+        `O'qituvchi (<b>${escapeHtml(teacherName)}</b> — <code>${targetId}</code>) muvaffaqiyatli saqlandi.`,
+        { parse_mode: 'HTML' }
+      );
+    }
+
+    // 11. O'qituvchini o'chirish
+    if (text.startsWith('/del_teacher')) {
+      if (role !== 'SUPER_ADMIN' && role !== 'IT_ADMIN') {
+        return bot.sendMessage(chatId, 'Bu amal faqat Super Admin va IT Adminlar uchun.');
+      }
+      const targetId = parseInt(text.replace('/del_teacher', '').trim(), 10);
+      const index = db.teachers.findIndex((t) => Number(t.id) === targetId);
+      if (index !== -1) {
+        const removed = db.teachers.splice(index, 1)[0];
+        saveDatabase(db);
+        logAccess(userId, displayName, role, `O'qituvchi o'chirildi: ${removed.name} (${targetId})`);
+        return bot.sendMessage(chatId, `O'qituvchi (<b>${escapeHtml(removed.name)}</b>) o'chirildi.`, { parse_mode: 'HTML' });
+      }
+      return bot.sendMessage(chatId, 'O\'qituvchi topilmadi.');
+    }
+
+    // 12. IT Adminlar boshqaruvi (Super Admin uchun)
+    if (text === 'IT Adminlar' || text === '/admins') {
+      if (role !== 'SUPER_ADMIN') {
+        return bot.sendMessage(chatId, `Bu bo'lim faqat Bosh Super Admin (ID: ${SUPER_ADMIN_ID}) uchun.`);
+      }
+      return renderAdminsManagement(chatId);
+    }
+
+    if (text.startsWith('/add_admin')) {
+      if (role !== 'SUPER_ADMIN') {
+        return bot.sendMessage(chatId, 'Bu amal faqat Bosh Super Admin uchun.');
+      }
+      const parts = text.replace('/add_admin', '').trim().split(/\s+/);
+      const targetId = parseInt(parts[0], 10);
+      const adminName = parts.slice(1).join(' ').trim();
+
+      if (!targetId || targetId <= 0 || !adminName) {
+        return bot.sendMessage(
+          chatId,
+          `Format: <code>/add_admin &lt;Telegram_ID&gt; &lt;Ism&gt;</code>\nMisol:\n<code>/add_admin 8223415949 Husniddin</code>`,
+          { parse_mode: 'HTML' }
+        );
+      }
+
+      const existing = db.itAdmins.find((a) => Number(a.id) === targetId);
+      if (existing) {
+        existing.name = adminName;
+      } else {
+        db.itAdmins.push({ id: targetId, name: adminName, addedAt: getFormattedTime() });
+      }
+      saveDatabase(db);
+      logAccess(userId, displayName, role, `IT Admin tayinlandi: ${adminName} (${targetId})`);
+      return bot.sendMessage(
+        chatId,
+        `IT Admin (<b>${escapeHtml(adminName)}</b> — <code>${targetId}</code>) muvaffaqiyatli tayinlandi.`,
+        { parse_mode: 'HTML' }
+      );
+    }
+
+    if (text.startsWith('/del_admin')) {
+      if (role !== 'SUPER_ADMIN') {
+        return bot.sendMessage(chatId, 'Bu amal faqat Bosh Super Admin uchun.');
+      }
+      const targetId = parseInt(text.replace('/del_admin', '').trim(), 10);
+      const index = db.itAdmins.findIndex((a) => Number(a.id) === targetId);
+      if (index !== -1) {
+        const removed = db.itAdmins.splice(index, 1)[0];
+        saveDatabase(db);
+        logAccess(userId, displayName, role, `IT Admin o'chirildi: ${removed.name} (${targetId})`);
+        return bot.sendMessage(chatId, `IT Admin (<b>${escapeHtml(removed.name)}</b>) o'chirildi.`, { parse_mode: 'HTML' });
+      }
+      return bot.sendMessage(chatId, 'IT Admin topilmadi.');
+    }
+
+    // 13. Kirish jurnali
+    if (text === 'Kirish jurnali' || text === '/logs') {
+      if (role !== 'SUPER_ADMIN' && role !== 'IT_ADMIN') {
+        return bot.sendMessage(chatId, 'Bu amal faqat Super Admin va IT Adminlar uchun.');
+      }
+      const logs = db.logs.slice(0, 15);
+      if (logs.length === 0) {
+        return bot.sendMessage(chatId, 'Hozircha kirish jurnali bo\'sh.');
+      }
+      let logMsg = `<b>Tizimga kirish jurnali (Oxirgi 15 ta)</b>\n${DIVIDER}\n\n`;
+      logs.forEach((l, idx) => {
+        logMsg +=
+          `${idx + 1}. [<code>${escapeHtml(l.timestamp)}</code>] <b>${escapeHtml(l.userName)}</b>\n` +
+          `   Amal: <i>${escapeHtml(l.action)}</i>\n\n`;
+      });
+      return bot.sendMessage(chatId, logMsg, { parse_mode: 'HTML' });
+    }
+
+    // Noma'lum matn bo'lsa, asosiy menyuni ko'rsatish
+    return bot.sendMessage(
+      chatId,
+      `Buyruq tushunilmadi. Quyidagi tugmalardan foydalaning yoki <code>/start</code> bosing:`,
+      { parse_mode: 'HTML', reply_markup: buildMainKeyboard(role) }
+    );
+  });
+
+  // ==========================================
+  // INLINE TUGMALAR (CALLBACK QUERY) TINGLOVCHISI
+  // ==========================================
+  bot.on('callback_query', async (query) => {
+    const chatId = query.message && query.message.chat ? query.message.chat.id : query.from.id;
+    const messageId = query.message ? query.message.message_id : null;
+    const userId = query.from.id;
+    const data = query.data || '';
+
+    try {
+      await bot.answerCallbackQuery(query.id);
+    } catch (_) {}
+
+    const { isAuthorized, role, name: customName } = checkUserRole(userId);
+    const userName =
+      [query.from.first_name, query.from.last_name].filter(Boolean).join(' ') || `Foydalanuvchi (${userId})`;
+    const displayName = customName || userName;
+
+    if (!isAuthorized) {
+      return bot.sendMessage(chatId, 'Sizda ushbu tizimdan foydalanish ruxsati yo\'q.');
+    }
+
+    // 1. Doskalar ro'yxatiga qaytish / Bekor qilish
+    if (data === 'show_board_list' || data === 'cmd_cancel') {
+      chatStates.delete(chatId);
+      return renderBoardList(chatId, messageId, role);
+    }
+
+    // 2. Doskani tanlash va boshqaruv kartasi
+    if (data.startsWith('select_board:')) {
+      const targetRoomId = normalizeId(data.replace('select_board:', ''));
+      return renderBoardDetails(chatId, targetRoomId, messageId);
+    }
+
+    // 3. Doskani ochish
+    if (data.startsWith('action_unlock:') || data.startsWith('unlock_room:')) {
+      const targetRoomId = normalizeId(data.replace('action_unlock:', '').replace('unlock_room:', ''));
+      const isAll = targetRoomId === 'ALL';
+      const room = db.rooms.find((r) => normalizeId(r.id) === targetRoomId);
+      const roomTitle = isAll ? 'Barcha doskalar' : (room ? room.name : targetRoomId);
+
+      if (isAll) {
+        broadcastCommand({
+          type: 'UNLOCK',
+          teacherName: displayName,
+          durationMinutes: 45
+        });
+      } else {
+        enqueueCommandForTarget(targetRoomId, {
+          type: 'UNLOCK',
+          teacherName: displayName,
+          durationMinutes: 45,
+          targetRoomId
+        });
+      }
+
+      trackActiveLesson(targetRoomId, chatId, displayName, roomTitle);
+      logAccess(userId, displayName, role, `Dars boshlandi (Ochildi): ${roomTitle} (45 daqiqa)`);
+
+      const confirmText =
+        `<b>Interaktiv Doska ochildi</b>\n` +
+        `${DIVIDER}\n` +
+        `Xona: <b>${escapeHtml(roomTitle)}</b>\n` +
+        `O'qituvchi: <b>${escapeHtml(displayName)}</b>\n` +
+        `Dars vaqti: <b>45 daqiqa</b>\n` +
+        `Vaqt: <code>${getFormattedTime()}</code>\n\n` +
+        `<i>Boshqarish uchun tugmalardan foydalaning:</i>`;
+
+      const inline_keyboard = [
+        [
+          { text: 'Doskani qulflash', callback_data: `action_lock:${targetRoomId}` },
+          { text: '+10 daqiqa', callback_data: `action_extend:${targetRoomId}` }
+        ],
+        [{ text: 'Doskalar ro\'yxatiga qaytish', callback_data: 'show_board_list' }]
+      ];
+      return sendOrEdit(chatId, confirmText, { inline_keyboard }, messageId);
+    }
+
+    // 4. Doskani qulflash
+    if (data.startsWith('action_lock:') || data.startsWith('lock_room:')) {
+      const targetRoomId = normalizeId(data.replace('action_lock:', '').replace('lock_room:', ''));
+      const isAll = targetRoomId === 'ALL';
+      const room = db.rooms.find((r) => normalizeId(r.id) === targetRoomId);
+      const roomTitle = isAll ? 'Barcha doskalar' : (room ? room.name : targetRoomId);
+
+      if (isAll) {
+        broadcastCommand({ type: 'LOCK' });
+      } else {
+        enqueueCommandForTarget(targetRoomId, { type: 'LOCK', targetRoomId });
+      }
+
+      activeLessons.delete(targetRoomId);
+      logAccess(userId, displayName, role, `Doska qulflandi: ${roomTitle}`);
+
+      const confirmText =
+        `<b>Doska qulflandi</b>\n` +
+        `${DIVIDER}\n` +
+        `Xona: <b>${escapeHtml(roomTitle)}</b>\n` +
+        `Mas'ul: <b>${escapeHtml(displayName)}</b>\n` +
+        `Vaqt: <code>${getFormattedTime()}</code>\n\n` +
+        `<i>Qayta ochish yoki ro'yxatga qaytish:</i>`;
+
+      const inline_keyboard = [
+        [{ text: 'Darsni boshlash (45 min)', callback_data: `action_unlock:${targetRoomId}` }],
+        [{ text: 'Doskalar ro\'yxatiga qaytish', callback_data: 'show_board_list' }]
+      ];
+      return sendOrEdit(chatId, confirmText, { inline_keyboard }, messageId);
+    }
+
+    // 5. Vaqt uzaytirish
+    if (data.startsWith('action_extend:')) {
+      const targetRoomId = normalizeId(data.replace('action_extend:', ''));
+      const isAll = targetRoomId === 'ALL';
+      const room = db.rooms.find((r) => normalizeId(r.id) === targetRoomId);
+      const roomTitle = isAll ? 'Barcha doskalar' : (room ? room.name : targetRoomId);
+
+      if (isAll) {
+        broadcastCommand({ type: 'EXTEND', minutes: 10 });
+      } else {
+        enqueueCommandForTarget(targetRoomId, { type: 'EXTEND', minutes: 10, targetRoomId });
+      }
+
+      logAccess(userId, displayName, role, `+10 daqiqa qo'shildi: ${roomTitle}`);
+
+      const confirmText =
+        `<b>Dars vaqti 10 daqiqaga uzaytirildi</b>\n` +
+        `${DIVIDER}\n` +
+        `Xona: <b>${escapeHtml(roomTitle)}</b>\n` +
+        `Mas'ul: <b>${escapeHtml(displayName)}</b>\n` +
+        `Vaqt: <code>${getFormattedTime()}</code>`;
+
+      const inline_keyboard = [
+        [
+          { text: 'Doskani qulflash', callback_data: `action_lock:${targetRoomId}` },
+          { text: 'Doskalar ro\'yxatiga qaytish', callback_data: 'show_board_list' }
+        ]
+      ];
+      return sendOrEdit(chatId, confirmText, { inline_keyboard }, messageId);
+    }
+
+    // 6. Yangi doskaga xona nomi kiritish (Avtomatik aniqlangan doskadan)
+    if (data.startsWith('cmd_setup_board:')) {
+      if (role !== 'SUPER_ADMIN' && role !== 'IT_ADMIN') {
+        return bot.sendMessage(chatId, 'Bu amal faqat Super Admin va IT Adminlar uchun.');
+      }
+      const targetId = normalizeId(data.replace('cmd_setup_board:', ''));
+      chatStates.set(chatId, {
+        step: 'AWAITING_ROOM_NAME',
+        payload: { targetId },
+        updatedAt: Date.now()
+      });
+
+      return bot.sendMessage(
+        chatId,
+        `<b>Doskani xonaga biriktirish</b>\n` +
+          `${DIVIDER}\n` +
+          `Qurilma ID: <code>${escapeHtml(targetId)}</code>\n\n` +
+          `Iltimos, ushbu doska o'rnatilgan <b>xona nomini</b> yozib yuboring:\n` +
+          `<i>(Masalan: 101-Fizika yoki 204-Informatika)</i>`,
+        {
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: [[{ text: 'Bekor qilish', callback_data: 'cmd_cancel' }]]
+          }
+        }
+      );
+    }
+
+    // 7. Qo'lda 2 bosqichli xona qo'shish (1. ID -> 2. Xona nomi)
+    if (data === 'start_manual_room_add') {
+      if (role !== 'SUPER_ADMIN' && role !== 'IT_ADMIN') {
+        return bot.sendMessage(chatId, 'Bu amal faqat Super Admin va IT Adminlar uchun.');
+      }
+      chatStates.set(chatId, {
+        step: 'AWAITING_MANUAL_MAC',
+        payload: {},
+        updatedAt: Date.now()
+      });
+
+      return bot.sendMessage(
+        chatId,
+        `<b>1-qadam: Qurilma ID (MAC) manzilini kiriting</b>\n` +
+          `${DIVIDER}\n` +
+          `Yangi xona uchun doskaning MAC manzilini yoki Qurilma ID sini yozib yuboring:\n` +
+          `<i>(Masalan: 00:1A:2B:3C:4D:5E yoki BOARD_123ABC)</i>`,
+        {
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: [[{ text: 'Bekor qilish', callback_data: 'cmd_cancel' }]]
+          }
+        }
+      );
+    }
+
+    // 8. Xonani inline tugma orqali o'chirish
+    if (data.startsWith('del_room:')) {
+      if (role !== 'SUPER_ADMIN' && role !== 'IT_ADMIN') {
+        return bot.sendMessage(chatId, 'Bu amal faqat Super Admin va IT Adminlar uchun.');
+      }
+      const targetId = normalizeId(data.replace('del_room:', ''));
+      const index = db.rooms.findIndex((r) => normalizeId(r.id) === targetId);
+      if (index !== -1) {
+        const removed = db.rooms.splice(index, 1)[0];
+        saveDatabase(db);
+        enqueueCommandForTarget(removed.id, { type: 'UNREGISTER', targetRoomId: removed.id });
+        logAccess(userId, displayName, role, `Xona o'chirildi: ${removed.name} (${removed.id})`);
+      }
+      return renderRoomsManagement(chatId, messageId);
+    }
+
+    // 9. O'qituvchi qo'shish / o'chirish inline oqimi
+    if (data === 'start_add_teacher') {
+      if (role !== 'SUPER_ADMIN' && role !== 'IT_ADMIN') {
+        return bot.sendMessage(chatId, 'Bu amal faqat Super Admin va IT Adminlar uchun.');
+      }
+      chatStates.set(chatId, {
+        step: 'AWAITING_TEACHER_INPUT',
+        payload: {},
+        updatedAt: Date.now()
+      });
+      return bot.sendMessage(
+        chatId,
+        `<b>Yangi o'qituvchi qo'shish</b>\n${DIVIDER}\n` +
+          `O'qituvchining Telegram ID raqami va F.I.SH ni bitta xabarda yuboring:\n` +
+          `<i>Misol:</i> <code>123456789 Ali Valiyev</code>`,
+        {
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: [[{ text: 'Bekor qilish', callback_data: 'cmd_cancel' }]]
+          }
+        }
+      );
+    }
+
+    if (data.startsWith('del_teacher:')) {
+      if (role !== 'SUPER_ADMIN' && role !== 'IT_ADMIN') {
+        return bot.sendMessage(chatId, 'Bu amal faqat Super Admin va IT Adminlar uchun.');
+      }
+      const targetId = parseInt(data.replace('del_teacher:', '').trim(), 10);
+      const index = db.teachers.findIndex((t) => Number(t.id) === targetId);
+      if (index !== -1) {
+        const removed = db.teachers.splice(index, 1)[0];
+        saveDatabase(db);
+        logAccess(userId, displayName, role, `O'qituvchi o'chirildi: ${removed.name} (${targetId})`);
+      }
+      return renderTeachersManagement(chatId, messageId);
+    }
+
+    // 10. IT Admin qo'shish / o'chirish inline oqimi (Super Admin)
+    if (data === 'start_add_admin') {
+      if (role !== 'SUPER_ADMIN') {
+        return bot.sendMessage(chatId, 'Bu amal faqat Bosh Super Admin uchun.');
+      }
+      chatStates.set(chatId, {
+        step: 'AWAITING_ADMIN_INPUT',
+        payload: {},
+        updatedAt: Date.now()
+      });
+      return bot.sendMessage(
+        chatId,
+        `<b>Yangi IT Admin tayinlash</b>\n${DIVIDER}\n` +
+          `IT Admin Telegram ID raqami va ismini bitta xabarda yuboring:\n` +
+          `<i>Misol:</i> <code>8223415949 Husniddin</code>`,
+        {
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: [[{ text: 'Bekor qilish', callback_data: 'cmd_cancel' }]]
+          }
+        }
+      );
+    }
+
+    if (data.startsWith('del_admin:')) {
+      if (role !== 'SUPER_ADMIN') {
+        return bot.sendMessage(chatId, 'Bu amal faqat Bosh Super Admin uchun.');
+      }
+      const targetId = parseInt(data.replace('del_admin:', '').trim(), 10);
+      const index = db.itAdmins.findIndex((a) => Number(a.id) === targetId);
+      if (index !== -1) {
+        const removed = db.itAdmins.splice(index, 1)[0];
+        saveDatabase(db);
+        logAccess(userId, displayName, role, `IT Admin o'chirildi: ${removed.name} (${targetId})`);
+      }
+      return renderAdminsManagement(chatId, messageId);
+    }
+  });
+}
+
+// ==========================================
+// SERVERNI ISHGA TUSHIRISH
+// ==========================================
 app.listen(PORT, '0.0.0.0', () => {
   console.log('=========================================');
-  console.log('SmartBoard 86 Veb Boshqaruv Platformasi ishga tushdi');
+  console.log('SmartBoard Render Server ishga tushdi!');
   console.log(`Port: ${PORT}`);
+  console.log(`Super Admin ID: ${SUPER_ADMIN_ID}`);
   console.log(`Baza fayli: ${DB_FILE}`);
   console.log('=========================================');
 });

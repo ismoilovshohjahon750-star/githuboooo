@@ -5,45 +5,37 @@ Ushbu server **SmartBoard 86" Doska** ilovasi uchun markaziy boshqaruv markazidi
 
 ---
 
-## 🚀 Render.com ga O'rnatish (3 qadamda)
+## Render.com ga O'rnatish (3 qadamda)
 
 ### 1-qadam: GitHub ga yuklash
-1. Ushbu `render-server` papkasini alohida GitHub omboriga (repository) yuklang (masalan `smartboard-bot-server`).
+1. Ushbu `render-server` papkasini GitHub omboriga (repository) yuklang.
 
 ### 2-qadam: Render.com da Web Service ochish
-1. [render.com](https://render.com) saytiga kiring va kiring (Login/Sign up).
+1. [render.com](https://render.com) saytiga kiring.
 2. **"New +"** tugmasini bosing -> **"Web Service"** ni tanlang.
-3. Yuqoridagi GitHub repository-ni tanlang (Connect).
+3. GitHub repository-ni tanlang (Connect).
 4. Quyidagi parametrlarni kiriting:
-   - **Name**: `smartboard-bot-server` (yoki ixtiyoriy nom)
-   - **Region**: Frankfurt (EU Central) yoki Singapore
    - **Runtime**: `Node`
    - **Build Command**: `npm install`
    - **Start Command**: `node server.js`
    - **Instance Type**: `Free`
 
 ### 3-qadam: Environment Variables (O'zgaruvchilar)
-Pastdagi **Environment Variables** bo'limiga quyidagilarni kiriting:
-- `TELEGRAM_BOT_TOKEN`: `8882740210****************` (yoki o'zingizning bot tokeningiz)
-- `SUPER_ADMIN_ID`: `841122233`
+**Environment Variables** bo'limiga quyidagilarni kiriting:
+- `TELEGRAM_BOT_TOKEN`: Telegram BotFather bergan bot tokeningiz
+- `SUPER_ADMIN_ID`: `8453381252`
 
 So'ng **"Create Web Service"** tugmasini bosing.
-1-2 daqiqada server ishga tushadi va sizga quyidagicha havola beradi:
-`https://smartboard-bot-server.onrender.com`
 
 ---
 
-## 📱 Doskada (APK) Sozlash:
+## Doskada (APK) Sozlash:
 
-1. Doskani yoqing va qulflangan ekranda **"Admin PIN"** tugmasini bosing (Standart PIN: `1234`).
+1. Doskani yoqing va qulflangan ekranda chap yuqori burchakni 3 soniya bosib turing (Standart PIN: `1234`).
 2. **"Sozlamalar"** (Settings) bo'limiga o'ting.
-3. **"Ulanish usuli"** ni **"🟢 Render Server orqali"** qilib belgilang.
-4. **"Render Server Manzili"** ga Render bergan URL manzilini kiriting:
-   `https://smartboard-bot-server.onrender.com`
-5. **"Server aloqasini tekshirish"** tugmasini bosing — "Ulanish muvaffaqiyatli!" xabari chiqadi.
+3. **"Ulanish usuli"** ni **"Render Server"** qilib belgilang.
+4. **"Render Server Manzili"** ga Render URL manzilini kiriting (standart: `https://mukamal-doska.onrender.com`).
+5. **"Server aloqasini tekshirish"** tugmasini bosing — server va Telegram bot holati ko'rsatiladi.
 6. **"Saqlash"** tugmasini bosing.
 
-Endi 2 ta doska bo'lsa ham:
-- 1-doska: Xona ID = `101-XONA`
-- 2-doska: Xona ID = `102-XONA`
-O'qituvchi Telegram botda aynan qaysi xona doskasini ochishni tanlaydi va o'sha doska avtomatik ochiladi!
+Endi Telegram botda har bir xona doskasini alohida yoki barchasini birga boshqarish mumkin.

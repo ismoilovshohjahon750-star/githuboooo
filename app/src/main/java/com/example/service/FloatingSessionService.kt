@@ -183,7 +183,14 @@ class FloatingSessionService : Service() {
                 executeLock(target, isFromServer = true)
             },
             onExtendRequested = { addMin ->
-                LessonSessionManager.onExtendMinutes?.invoke(addMin)
+                val handler = LessonSessionManager.onExtendMinutes
+                if (handler != null) {
+                    handler.invoke(addMin)
+                } else {
+                    val addSecs = addMin * 60
+                    LessonSessionManager.activeSeconds.value += addSecs
+                    LessonSessionManager.sessionTotalSeconds.value += addSecs
+                }
             }
         )
 
@@ -197,7 +204,14 @@ class FloatingSessionService : Service() {
                 executeLock(targetRoomId)
             },
             onExtendRequested = { additionalMinutes ->
-                LessonSessionManager.onExtendMinutes?.invoke(additionalMinutes)
+                val handler = LessonSessionManager.onExtendMinutes
+                if (handler != null) {
+                    handler.invoke(additionalMinutes)
+                } else {
+                    val addSecs = additionalMinutes * 60
+                    LessonSessionManager.activeSeconds.value += addSecs
+                    LessonSessionManager.sessionTotalSeconds.value += addSecs
+                }
             },
             getStatusInfo = {
                 val isLocked = LessonSessionManager.isLocked.value
@@ -215,9 +229,32 @@ class FloatingSessionService : Service() {
             }
         )
 
-        // Yangi doska aniqlanganda adminlarga xabar berish ulanishi
+        // Yangi doska aniqlanganda adminlarga xabar berish ulanishi (Render Server va Direct Bot uchun)
         LessonSessionManager.onRequestRegisterNewBoard = { macAddr, devId ->
-            botManager?.notifyAdminsNewBoardDetected(macAddr, devId)
+            val cfg = prefs.loadConfig()
+            if (cfg.connectionMode == com.example.model.SmartBoardConfig.MODE_RENDER_SERVER) {
+                serverClient?.requestRegistrationFromServer()
+            } else {
+                botManager?.notifyAdminsNewBoardDetected(macAddr, devId)
+            }
+        }
+
+        // Doska ekranidan to'g'ridan-to'g'ri xona kiritilganda Render serverga yuborish
+        LessonSessionManager.onRegisterBoardToServer = { boardId, roomName ->
+            val cfg = prefs.loadConfig()
+            if (cfg.connectionMode == com.example.model.SmartBoardConfig.MODE_RENDER_SERVER) {
+                serverClient?.registerBoardOnServer(boardId, roomName)
+            }
+        }
+
+        // Dars taymeri tugaganda server yoki botga xabar yuborish
+        LessonSessionManager.onLessonExpired = {
+            val cfg = prefs.loadConfig()
+            if (cfg.connectionMode == com.example.model.SmartBoardConfig.MODE_RENDER_SERVER) {
+                serverClient?.notifyLessonExpired()
+            } else {
+                botManager?.notifyLessonExpired()
+            }
         }
 
         restartBotPolling()
@@ -483,8 +520,18 @@ class FloatingSessionService : Service() {
 
                     // 45 daqiqalik dars vaqti tugaganda avtomatik doska qulflanadi va kutish ekrani ochiladi
                     if (secs <= 0 && !LessonSessionManager.isLocked.value) {
-                        botManager?.notifyLessonExpired()
-                        LessonSessionManager.onFinishLesson?.invoke()
+                        val cfg = prefs.loadConfig()
+                        if (cfg.connectionMode == com.example.model.SmartBoardConfig.MODE_RENDER_SERVER) {
+                            serverClient?.notifyLessonExpired()
+                        } else {
+                            botManager?.notifyLessonExpired()
+                        }
+                        val finishHandler = LessonSessionManager.onFinishLesson
+                        if (finishHandler != null) {
+                            finishHandler.invoke()
+                        } else {
+                            LessonSessionManager.isLocked.value = true
+                        }
                         openMainActivity(false)
                     }
                 }
@@ -546,6 +593,7 @@ class FloatingSessionService : Service() {
         super.onDestroy()
         updateJob?.cancel()
         botManager?.stopPolling()
+        serverClient?.stopPolling()
         removeFloatingView()
         floatingView = null
 

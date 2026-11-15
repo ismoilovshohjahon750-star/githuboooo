@@ -114,7 +114,7 @@ fun AdminPinDialog(
                 )
 
                 Text(
-                    text = "Tizim sozlamalariga kirish uchun PIN kiriting (Standart: 1234).\nDoska faqat veb boshqaruv paneli orqali ochiladi.",
+                    text = "Tizim sozlamalariga kirish uchun PIN kiriting (Standart: 1234).\nDoska faqat Telegram bot orqali ochiladi.",
                     fontSize = 12.sp,
                     color = TextSecondary,
                     textAlign = TextAlign.Center,
@@ -500,7 +500,7 @@ fun AdminSettingsDialog(
                                             serverTestStatus = null
                                         },
                                         singleLine = true,
-                                        placeholder = { Text("https://smartboard-bot-server.onrender.com", color = TextSecondary) },
+                                        placeholder = { Text(SmartBoardConfig.DEFAULT_SERVER_URL, color = TextSecondary) },
                                         colors = OutlinedTextFieldDefaults.colors(
                                             focusedBorderColor = NeonCyan,
                                             unfocusedBorderColor = SurfaceLightDark,

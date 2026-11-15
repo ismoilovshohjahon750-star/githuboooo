@@ -198,7 +198,7 @@ class TelegramBotManager(
             sendMessage(
                 token = token,
                 chatId = chatId,
-                text = AccessControlManager.REJECTION_MESSAGE
+                text = "${AccessControlManager.REJECTION_MESSAGE}\n\nSizning Telegram ID: <code>$userId</code>"
             )
             return
         }
@@ -212,11 +212,43 @@ class TelegramBotManager(
 
         val cleanText = text.replace(Regex("[\\p{So}\\p{Cn}]"), "").trim()
 
+        val menuButtons = setOf(
+            "Darsni boshlash (45 daqiqa)",
+            "Doskani yopish",
+            "Holatni tekshirish",
+            "10 daqiqa qo'shish",
+            "Xonalar",
+            "Xona qo'shish",
+            "O'qituvchilar",
+            "O'qituvchi qo'shish",
+            "Kirish jurnali",
+            "IT Adminlar",
+            "IT Admin qo'shish"
+        )
+        val isCommandOrMenu = cleanText.startsWith("/") || cleanText.startsWith("cmd_") || menuButtons.contains(cleanText)
+
+        if (isCommandOrMenu && awaitingRoomSetupForChat.containsKey(chatId)) {
+            awaitingRoomSetupForChat.remove(chatId)
+        }
+
         // 2. Yangi doska uchun xona ma'lumotlarini qabul qilish (Suhbat holati)
-        if (awaitingRoomSetupForChat.containsKey(chatId) && !cleanText.startsWith("/") && !cleanText.startsWith("cmd_")) {
-            val targetMac = awaitingRoomSetupForChat.remove(chatId) ?: ""
+        if (awaitingRoomSetupForChat.containsKey(chatId) && !isCommandOrMenu) {
+            if (cleanText.equals("Bekor qilish", ignoreCase = true)) {
+                awaitingRoomSetupForChat.remove(chatId)
+                sendWelcomeMenu(token, chatId, userDisplayName, isItAdmin, isSuperAdmin)
+                return
+            }
             val roomName = cleanText.trim()
-            if (targetMac.isNotBlank() && roomName.isNotBlank()) {
+            if (roomName.length < 2) {
+                sendMessage(
+                    token = token,
+                    chatId = chatId,
+                    text = "Xona nomi juda qisqa. Iltimos, to'liqroq yozing (masalan: <code>101-Fizika</code>) yoki <code>/cancel</code> bosing:"
+                )
+                return
+            }
+            val targetMac = awaitingRoomSetupForChat.remove(chatId) ?: ""
+            if (targetMac.isNotBlank()) {
                 accessControl.addRoom(targetMac, roomName, userDisplayName)
                 accessControl.logAccess(userId, userDisplayName, "Doska ro'yxatdan o'tkazildi: $roomName ($targetMac)")
                 withContext(Dispatchers.Main) {
@@ -1061,7 +1093,7 @@ class TelegramBotManager(
             Qurilma ID: <code>$androidId</code>
             
             Ushbu yangi doska o'rnatilgan xona ma'lumotlarini kiriting.
-            Quyidagi tugmani bosing yoki to'g'ridan-to'g'ri xona nomini yuboring:
+            Quyidagi tugmani bosing va xona nomini yuboring:
         """.trimIndent()
 
         for (adminId in adminIds) {
@@ -1117,11 +1149,12 @@ class TelegramBotManager(
     }
 
     private fun buildActiveLessonInlineKeyboard(roomId: String = ""): JSONObject {
+        val lockCallback = if (roomId.isNotBlank()) "cmd_room_lock:$roomId" else "cmd_lock"
         val rows = JSONArray().apply {
             put(JSONArray().apply {
                 put(JSONObject().apply {
                     put("text", "Doskani yopish")
-                    put("callback_data", "cmd_lock")
+                    put("callback_data", lockCallback)
                 })
             })
             put(JSONArray().apply {

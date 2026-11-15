@@ -17,12 +17,13 @@ data class SmartBoardConfig(
     val keepScreenAwake: Boolean = true,
     val isRegistered: Boolean = false,
     val connectionMode: String = MODE_RENDER_SERVER,
-    val serverUrl: String = DEFAULT_SERVER_URL
+    val serverUrl: String = DEFAULT_SERVER_URL,
+    val isLocalWebServerEnabled: Boolean = false
 ) {
     companion object {
         const val DEFAULT_BOT_TOKEN = ""
         const val DEFAULT_BOT_USERNAME = ""
-        const val DEFAULT_SERVER_URL = "https://mukamal-doska.onrender.com"
+        const val DEFAULT_SERVER_URL = "http://127.0.0.1:3000"
         const val MODE_RENDER_SERVER = "RENDER_SERVER"
         const val MODE_DIRECT_BOT = "DIRECT_BOT"
     }
@@ -78,7 +79,8 @@ class SmartBoardPreferences(context: Context) {
             keepScreenAwake = prefs.getBoolean(KEY_KEEP_AWAKE, true),
             isRegistered = prefs.getBoolean(KEY_IS_REGISTERED, false),
             connectionMode = prefs.getString(KEY_CONNECTION_MODE, SmartBoardConfig.MODE_RENDER_SERVER) ?: SmartBoardConfig.MODE_RENDER_SERVER,
-            serverUrl = prefs.getString(KEY_SERVER_URL, SmartBoardConfig.DEFAULT_SERVER_URL) ?: SmartBoardConfig.DEFAULT_SERVER_URL
+            serverUrl = prefs.getString(KEY_SERVER_URL, SmartBoardConfig.DEFAULT_SERVER_URL) ?: SmartBoardConfig.DEFAULT_SERVER_URL,
+            isLocalWebServerEnabled = prefs.getBoolean(KEY_LOCAL_WEB_SERVER_ENABLED, false)
         )
     }
 
@@ -86,6 +88,21 @@ class SmartBoardPreferences(context: Context) {
 
     fun setBoardRegistered(registered: Boolean) {
         prefs.edit().putBoolean(KEY_IS_REGISTERED, registered).apply()
+    }
+
+    fun hasMasterRoleInitialized(): Boolean =
+        prefs.getBoolean(KEY_MASTER_ROLE_INITIALIZED, false)
+
+    fun markMasterRoleInitialized(isMaster: Boolean, resolvedServerUrl: String? = null) {
+        prefs.edit().apply {
+            putBoolean(KEY_MASTER_ROLE_INITIALIZED, true)
+            putBoolean(KEY_LOCAL_WEB_SERVER_ENABLED, isMaster)
+            putString(KEY_CONNECTION_MODE, SmartBoardConfig.MODE_RENDER_SERVER)
+            if (!resolvedServerUrl.isNullOrBlank()) {
+                putString(KEY_SERVER_URL, resolvedServerUrl.trim())
+            }
+            apply()
+        }
     }
 
     fun saveConfig(config: SmartBoardConfig) {
@@ -103,6 +120,8 @@ class SmartBoardPreferences(context: Context) {
             putBoolean(KEY_IS_REGISTERED, config.isRegistered)
             putString(KEY_CONNECTION_MODE, config.connectionMode)
             putString(KEY_SERVER_URL, config.serverUrl)
+            putBoolean(KEY_LOCAL_WEB_SERVER_ENABLED, config.isLocalWebServerEnabled)
+            putBoolean(KEY_MASTER_ROLE_INITIALIZED, true)
             apply()
         }
     }
@@ -121,5 +140,7 @@ class SmartBoardPreferences(context: Context) {
         private const val KEY_IS_REGISTERED = "key_is_registered"
         private const val KEY_CONNECTION_MODE = "key_connection_mode"
         private const val KEY_SERVER_URL = "key_server_url"
+        private const val KEY_LOCAL_WEB_SERVER_ENABLED = "key_local_web_server_enabled"
+        private const val KEY_MASTER_ROLE_INITIALIZED = "key_master_role_initialized"
     }
 }

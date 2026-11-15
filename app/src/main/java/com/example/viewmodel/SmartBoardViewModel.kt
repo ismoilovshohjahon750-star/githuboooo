@@ -139,10 +139,11 @@ class SmartBoardViewModel(application: Application) : AndroidViewModel(applicati
 
         // Botdan yoki Telegram orqali xona ro'yxatdan o'tkazilganda
         LessonSessionManager.onBoardRegisteredFromBot = { boardId, roomName ->
-            if (matchesDeviceTarget(boardId)) {
-                accessControl.addRoom(boardId, roomName, "Telegram Bot")
+            if (matchesDeviceTarget(boardId) || boardId == _uiState.value.config.boardId) {
+                val resolvedBoardId = boardId.ifBlank { _uiState.value.config.boardId }
+                accessControl.addRoom(resolvedBoardId, roomName, "Telegram Bot")
                 val current = _uiState.value.config
-                val updated = current.copy(boardId = boardId, roomName = roomName, isRegistered = true)
+                val updated = current.copy(boardId = resolvedBoardId, roomName = roomName, isRegistered = true)
                 prefs.saveConfig(updated)
                 prefs.setBoardRegistered(true)
                 _uiState.value = _uiState.value.copy(
@@ -153,6 +154,20 @@ class SmartBoardViewModel(application: Application) : AndroidViewModel(applicati
                 refreshAccessData()
                 playBeepTone(ToneGenerator.TONE_PROP_BEEP)
             }
+        }
+
+        // Serverdan xona o'chirilganda holatni yangilash
+        LessonSessionManager.onBoardUnregisteredFromBot = {
+            val current = _uiState.value.config
+            val updated = current.copy(roomName = "", isRegistered = false)
+            prefs.saveConfig(updated)
+            prefs.setBoardRegistered(false)
+            _uiState.value = _uiState.value.copy(
+                config = updated,
+                isBoardRegistered = false,
+                lockMessageNotice = "Xona biriktirilishi bekor qilindi"
+            )
+            refreshAccessData()
         }
 
         // Bot holatini kuzatib UI ga uzatish
@@ -175,11 +190,17 @@ class SmartBoardViewModel(application: Application) : AndroidViewModel(applicati
     fun registerThisBoardAsRoom(roomName: String): Boolean {
         val cleanName = roomName.trim().ifBlank { "Doska ($deviceMacAddress)" }
         val current = _uiState.value.config
-        val updated = current.copy(boardId = deviceMacAddress, roomName = cleanName, isRegistered = true)
+        val resolvedId = if (com.example.util.DeviceHardwareUtil.isValidMac(deviceMacAddress)) {
+            deviceMacAddress
+        } else {
+            current.boardId.ifBlank { deviceMacAddress }
+        }
+        val updated = current.copy(boardId = resolvedId, roomName = cleanName, isRegistered = true)
         prefs.saveConfig(updated)
         prefs.setBoardRegistered(true)
-        val success = accessControl.addRoom(deviceMacAddress, cleanName, "Doska ekrani orqali")
-        accessControl.logAccess(0L, "Doska ekrani", "Doska ro'yxatdan o'tkazildi: $cleanName ($deviceMacAddress)")
+        val success = accessControl.addRoom(resolvedId, cleanName, "Doska ekrani orqali")
+        accessControl.logAccess(0L, "Doska ekrani", "Doska ro'yxatdan o'tkazildi: $cleanName ($resolvedId)")
+        LessonSessionManager.onRegisterBoardToServer?.invoke(resolvedId, cleanName)
         _uiState.value = _uiState.value.copy(
             config = updated,
             isBoardRegistered = true,
@@ -302,6 +323,7 @@ class SmartBoardViewModel(application: Application) : AndroidViewModel(applicati
                     if (remaining <= 0) {
                         _uiState.value = _uiState.value.copy(activeSecondsRemaining = 0)
                         playBeepTone(ToneGenerator.TONE_CDMA_HIGH_L)
+                        LessonSessionManager.onLessonExpired?.invoke()
                         lockBoard()
                         accessControl.logAccess(0L, "Tizim taymeri", "45 daqiqalik dars tugadi (Avtomatik bloklandi)")
                         refreshAccessData()
@@ -393,11 +415,28 @@ class SmartBoardViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun updateConfig(newConfig: SmartBoardConfig) {
-        prefs.saveConfig(newConfig)
-        _uiState.value = _uiState.value.copy(config = newConfig)
-        // 24/7 Xizmatga yangi tokenni yuklash
-        FloatingSessionService.reloadToken(getApplication())
-        LessonSessionManager.onReloadBotToken?.invoke()
+        val resolvedRegistered = newConfig.roomName.isNotBlank()
+        val finalConfig = newConfig.copy(isRegistered = resolvedRegistered)
+        prefs.saveConfig(finalConfig)
+        prefs.setBoardRegistered(resolvedRegistered)
+        if (resolvedRegistered && finalConfig.boardId.isNotBlank()) {
+            accessControl.addRoom(finalConfig.boardId, finalConfig.roomName, "Admin Sozlamalari")
+        }
+        _uiState.value = _uiState.value.copy(
+            config = finalConfig,
+            isBoardRegistered = resolvedRegistered
+        )
+        refreshAccessData()
+        // 24/7 Xizmatga yangi sozlamalarni bir marta yuklash
+        val reloadHook = LessonSessionManager.onReloadBotToken
+        if (reloadHook != null) {
+            reloadHook.invoke()
+        } else {
+            FloatingSessionService.reloadToken(getApplication())
+        }
+        if (resolvedRegistered && finalConfig.connectionMode == SmartBoardConfig.MODE_RENDER_SERVER) {
+            LessonSessionManager.onRegisterBoardToServer?.invoke(finalConfig.boardId, finalConfig.roomName)
+        }
     }
 
     suspend fun testTelegramToken(token: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
@@ -437,10 +476,25 @@ class SmartBoardViewModel(application: Application) : AndroidViewModel(applicati
             return@withContext Pair(false, "Server manzili https:// bilan boshlanishi kerak")
         }
         try {
-            val request = Request.Builder().url("$cleanUrl/health").build()
+            val request = Request.Builder().url("$cleanUrl/").build()
             testClient.newCall(request).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
                 if (resp.isSuccessful) {
-                    return@withContext Pair(true, "Render Server faol va javob bermoqda (OK)")
+                    return@withContext try {
+                        val json = JSONObject(body)
+                        val botConnected = json.optBoolean("botConnected", true)
+                        val botUser = json.optString("botUsername", "")
+                        val activeBoards = json.optInt("activeBoardsCount", 0)
+                        if (!botConnected) {
+                            Pair(false, "Server faol, lekin Telegram bot ulanmagan (Tokenni tekshiring)")
+                        } else if (botUser.isNotBlank()) {
+                            Pair(true, "Faol: @$botUser | Doskalar: $activeBoards ta")
+                        } else {
+                            Pair(true, "Render Server faol (Doskalar: $activeBoards ta)")
+                        }
+                    } catch (_: Exception) {
+                        Pair(true, "Render Server faol va javob bermoqda (OK)")
+                    }
                 }
                 return@withContext Pair(false, "Server xatolik qaytardi (HTTP ${resp.code})")
             }

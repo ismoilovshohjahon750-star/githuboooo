@@ -861,6 +861,10 @@
         </div>
       </div>
 
+      <div id="backendStatusBox" class="board-info-box" style="margin-bottom: 14px;">
+        <div class="board-info-row"><span>Node.js Backend:</span><strong id="backendStatusText">Tekshirilmoqda...</strong></div>
+      </div>
+
       <div id="loginError" class="alert-error hidden"></div>
 
       <form id="loginForm" onsubmit="handleLogin(event)">
@@ -1183,11 +1187,12 @@
               <div id="apkSetupCard" class="card hidden">
                 <div class="card-title" style="margin-bottom: 6px;">86" Doska (APK) ulanish manzili</div>
                 <div class="card-meta" style="margin-bottom: 6px;">
-                  Yangi doskadagi SmartBoard ilovasida Admin PIN (1234) orqali Sozlamalarga kiring va Server manzili sifatida quyidagi URL ni kiriting:
+                  Yangi doskadagi SmartBoard ilovasida Admin PIN (1234) orqali Sozlamalarga kiring va Server manzili sifatida quyidagi tarmoq URL manzilini kiriting:
                 </div>
+                <div id="lanUrlsList"></div>
                 <div class="code-copy-box">
                   <span id="serverOriginText">-</span>
-                  <button class="btn btn-secondary btn-sm" onclick="copyServerUrl()">Nusxalash</button>
+                  <button class="btn btn-secondary btn-sm" onclick="copyTextValue(document.getElementById('serverOriginText').textContent)">Nusxalash</button>
                 </div>
                 <div class="card-meta">Doska tarmoqqa ulanganda boshqaruv panelining yuqori qismida avtomatik ravishda "Yangi interaktiv doska aniqlandi" bildirishnomasi chiqadi.</div>
               </div>
@@ -1249,12 +1254,14 @@
   </div>
 
   <script>
+    const API_BASE = window.location.protocol === 'file:' ? 'http://localhost:3000' : '';
     const TOKEN_KEY = 'smartboard_web_token';
     let authToken = localStorage.getItem(TOKEN_KEY) || '';
     let currentState = null;
     let activeTab = 'boards';
     let boardFilter = 'all';
     let refreshTimer = null;
+    let backendPingTimer = null;
     let actionPending = false;
 
     const ICON_UNLOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path></svg>';
@@ -1291,12 +1298,28 @@
       inp.type = inp.type === 'password' ? 'text' : 'password';
     }
 
+    async function checkBackendHealth() {
+      const statusText = document.getElementById('backendStatusText');
+      const statusBox = document.getElementById('backendStatusBox');
+      if (!statusText || !statusBox) return;
+      try {
+        const res = await fetch(API_BASE + '/api/status');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        statusText.style.color = 'var(--success)';
+        statusText.textContent = `Faol (Xona: ${data.roomsCount || 0}, Doska: ${data.activeBoardsCount || 0})`;
+      } catch (_) {
+        statusText.style.color = 'var(--danger)';
+        statusText.textContent = 'Ulanmagan (node server.js ni ishga tushiring)';
+      }
+    }
+
     async function apiFetch(url, options = {}) {
       const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
       if (authToken) {
         headers['Authorization'] = 'Bearer ' + authToken;
       }
-      const res = await fetch(url, { ...options, headers });
+      const res = await fetch(API_BASE + url, { ...options, headers });
       const data = await res.json().catch(() => ({}));
       if (res.status === 401 && url !== '/api/auth/login') {
         logout(false);
@@ -1408,7 +1431,19 @@
       document.getElementById('profileName').textContent = user.name;
       document.getElementById('profileUsername').textContent = '@' + user.username;
       document.getElementById('profileRole').textContent = roleLabel(user.role);
-      document.getElementById('serverOriginText').textContent = window.location.origin;
+      const originUrl = window.location.protocol === 'file:' ? 'http://localhost:3000' : window.location.origin;
+      document.getElementById('serverOriginText').textContent = originUrl;
+
+      const lanUrls = state.lanUrls || [];
+      const lanUrlsEl = document.getElementById('lanUrlsList');
+      if (lanUrlsEl) {
+        lanUrlsEl.innerHTML = lanUrls.map((u) => `
+          <div class="code-copy-box">
+            <span>${escapeHtml(u)}</span>
+            <button class="btn btn-secondary btn-sm" onclick="copyTextValue('${escapeHtml(u)}')">Nusxalash</button>
+          </div>
+        `).join('');
+      }
 
       document.querySelectorAll('.admin-only').forEach((el) => {
         el.classList.toggle('hidden', !isAdmin);
@@ -1475,7 +1510,16 @@
       });
 
       if (currentState.rooms.length === 0) {
-        boardsList.innerHTML = `<div class="empty-state" style="grid-column: 1 / -1;">Hozircha ro'yxatda birorta xona yo'q. Yangi doska ulanganda tepada bildirishnoma chiqadi yoki "Xonalar" bo'limidan qo'shishingiz mumkin.</div>`;
+        const lanHints = (currentState.lanUrls && currentState.lanUrls.length > 0)
+          ? currentState.lanUrls.map((u) => `<div class="code-copy-box" style="max-width: 420px; margin: 10px auto 0;"><span>${escapeHtml(u)}</span><button class="btn btn-secondary btn-sm" onclick="copyTextValue('${escapeHtml(u)}')">Nusxalash</button></div>`).join('')
+          : '';
+        boardsList.innerHTML = `
+          <div class="empty-state" style="grid-column: 1 / -1;">
+            <div style="font-weight: 600; color: var(--text); margin-bottom: 6px;">Hozircha ro'yxatda birorta doska yoki xona yo'q</div>
+            <div>86" Android doskada Sozlamalar -> Server manziliga quyidagi Node.js server manzilini kiriting:</div>
+            ${lanHints}
+            <div style="margin-top: 10px; font-size: 12px;">Doska ulanganda yuqorida avtomatik "Yangi interaktiv doska aniqlandi" tugmasi chiqadi.</div>
+          </div>`;
         return;
       }
 
@@ -1745,12 +1789,12 @@
       }
     }
 
-    function copyServerUrl() {
-      const url = window.location.origin;
+    function copyTextValue(val) {
+      const text = String(val || '').trim();
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(url).then(() => showToast('Manzil nusxalandi'));
+        navigator.clipboard.writeText(text).then(() => showToast('Manzil nusxalandi'));
       } else {
-        showToast(url);
+        showToast(text);
       }
     }
 
@@ -1977,6 +2021,13 @@
 
     // Boot
     (async function init() {
+      checkBackendHealth();
+      backendPingTimer = setInterval(() => {
+        if (!document.getElementById('loginView').classList.contains('hidden')) {
+          checkBackendHealth();
+        }
+      }, 5000);
+
       if (authToken) {
         try {
           await apiFetch('/api/auth/me');
